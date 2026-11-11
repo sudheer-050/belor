@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en" data-mode="dark">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file:; font-src 'self' file:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Belor</title>
+<link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="bgfx" aria-hidden="true"><div id="bgimg"></div><div id="bgdim"></div></div>
+
+<div id="app">
+  <aside id="sidebar" aria-label="Terminal tabs">
+    <div class="side-top drag">
+      <div class="brand"><span class="brand-mark" data-icon="logo"></span><span class="brand-name">Belor</span></div>
+      <button id="collapse-btn" class="icon-btn nodrag" title="Collapse sidebar (Ctrl+Shift+B)" aria-label="Collapse sidebar" data-icon="sidebar"></button>
+    </div>
+
+    <div class="new-wrap">
+      <div class="split nodrag">
+        <button id="new-btn" class="new-main" title="New tab (Ctrl+Shift+T)"><span data-icon="plus"></span><span class="lbl">New tab</span></button>
+        <button id="new-menu-btn" class="new-more" title="Choose a shell" aria-label="Choose a shell" aria-haspopup="menu" data-icon="chevron"></button>
+      </div>
+      <div id="new-menu" class="popup" role="menu" hidden></div>
+    </div>
+
+    <div class="section-label"><span class="lbl">Tabs</span></div>
+    <div id="tabs" role="tablist" aria-orientation="vertical"></div>
+
+    <div class="side-bottom">
+      <button id="sound-btn" class="side-btn" title="Command sounds" aria-pressed="true"><span data-icon="sound" class="ico"></span><span class="lbl">Sounds on</span></button>
+      <div id="admin-badge" class="admin-badge" hidden><span data-icon="shield" class="ico"></span><span class="lbl">Administrator</span></div>
+      <button id="settings-btn" class="side-btn" title="Settings (Ctrl+,)"><span data-icon="gear" class="ico"></span><span class="lbl">Settings</span></button>
+    </div>
+  </aside>
+
+  <section id="stage">
+    <div id="topbar" class="drag">
+      <div class="crumb">
+        <span id="crumb-title">Terminal</span>
+        <span id="crumb-admin" class="pill-admin" hidden>Administrator</span>
+        <span id="crumb-sub"></span>
+      </div>
+    </div>
+    <div id="terms"></div>
+    <div id="findbar" class="findbar" role="search" hidden>
+      <input id="find-input" type="text" placeholder="Find in this tab" aria-label="Find in this tab" spellcheck="false">
+      <span id="find-count" class="find-count" aria-live="polite"></span>
+      <button id="find-case" class="icon-btn txt" title="Match case" aria-label="Match case" aria-pressed="false">Aa</button>
+      <button id="find-regex" class="icon-btn txt" title="Regular expression" aria-label="Regular expression" aria-pressed="false">.*</button>
+      <button id="find-prev" class="icon-btn" title="Previous match (Shift+Enter)" aria-label="Previous match" data-icon="up"></button>
+      <button id="find-next" class="icon-btn" title="Next match (Enter)" aria-label="Next match" data-icon="chevron"></button>
+      <button id="find-close" class="icon-btn" title="Close (Esc)" aria-label="Close find" data-icon="close"></button>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </section>
+</div>
+
+<div id="ctx" class="popup" role="menu" hidden></div>
+
+<aside id="drawer" class="drawer" role="dialog" aria-labelledby="dlg-title" hidden>
+  <header>
+    <h2 id="dlg-title">Settings</h2>
+    <button id="dlg-close" class="icon-btn" aria-label="Close settings" data-icon="close"></button>
+  </header>
+  <div id="dnav" class="dnav" role="tablist">
+    <button role="tab" data-panel="theme">Theme</button>
+    <button role="tab" data-panel="background">Background</button>
+    <button role="tab" data-panel="font">Font</button>
+    <button role="tab" data-panel="terminal">Terminal</button>
+    <button role="tab" data-panel="sounds">Alerts</button>
+    <button role="tab" data-panel="general">General</button>
+  </div>
+
+  <div class="dbody">
+
+    <!-- ===== THEME ===== -->
+    <section data-panel="theme">
+      <div class="row"><label for="set-follow">Match Windows light / dark</label>
+        <label class="switch"><input id="set-follow" type="checkbox"><span></span></label></div>
+
+      <h3>Presets</h3>
+      <div id="preset-grid" class="cards"></div>
+
+      <h3>My themes</h3>
+      <div id="saved-grid" class="cards"></div>
+      <div class="inline-form">
+        <input id="save-name" type="text" maxlength="32" placeholder="Name your theme" aria-label="Theme name">
+        <button id="save-theme" class="btn">Save current</button>
+      </div>
+
+      <h3>Colors</h3>
+      <div id="color-rows"></div>
+
+      <h3>Tab colors</h3>
+      <p class="hint">Each tab is colored by what is happening in it. They follow your theme unless you pick your own.</p>
+      <div id="tabcolor-rows"></div>
+
+      <h3>Text colors</h3>
+      <p class="hint">The 16 colors programs use. Red is for errors, green for success, blue for folders, and so on.</p>
+      <div id="ansi-grid" class="ansi"></div>
+
+      <div class="btn-row spaced">
+        <button id="exp-theme" class="btn">Copy theme JSON</button>
+        <button id="imp-theme" class="btn">Import…</button>
+        <input id="imp-file" type="file" accept=".json,application/json" hidden>
+      </div>
+    </section>
+
+    <!-- ===== BACKGROUND ===== -->
+    <section data-panel="background">
+      <div id="bg-type" class="seg" role="radiogroup" aria-label="Background type">
+        <button role="radio" data-type="theme">Theme</button>
+        <button role="radio" data-type="solid">Color</button>
+        <button role="radio" data-type="gradient">Gradient</button>
+        <button role="radio" data-type="image">Image</button>
+      </div>
+
+      <div data-bgp="solid">
+        <div class="row"><label for="bg-solid">Background color</label>
+          <div class="colorfield"><input id="bg-solid" type="color"><input id="bg-solid-hex" type="text" maxlength="7" spellcheck="false" aria-label="Hex value"></div></div>
+      </div>
+
+      <div data-bgp="gradient">
+        <h3>Presets</h3>
+        <div id="grad-presets" class="chips"></div>
+        <h3>Colors</h3>
+        <div id="grad-stops"></div>
+        <button id="add-stop" class="btn small">+ Add color</button>
+        <div class="row"><label for="grad-angle">Angle</label>
+          <div class="range"><input id="grad-angle" type="range" min="0" max="360" step="5"><output id="grad-angle-out"></output></div></div>
+      </div>
+
+      <div data-bgp="image">
+        <div id="drop" class="drop" tabindex="0">
+          <div>Drop an image here</div>
+          <button id="pick-img" class="btn">Choose image…</button>
+          <input id="img-file" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif,image/bmp" hidden>
+        </div>
+        <div id="recent-imgs" class="thumbs"></div>
+        <div class="row"><label for="img-fit">Fit</label>
+          <select id="img-fit"><option value="cover">Fill window (crop)</option><option value="contain">Fit inside</option><option value="stretch">Stretch</option><option value="tile">Tile</option><option value="center">Center, original size</option></select></div>
+        <div class="row"><label for="img-blur">Blur</label>
+          <div class="range"><input id="img-blur" type="range" min="0" max="40" step="1"><output id="img-blur-out"></output></div></div>
+        <div class="row"><label for="img-dim">Dim for readability</label>
+          <div class="range"><input id="img-dim" type="range" min="0" max="90" step="1"><output id="img-dim-out"></output></div></div>
+      </div>
+
+      <h3>Transparency</h3>
+      <p class="hint">Lower these to let the background show through.</p>
+      <div class="row"><label for="op-term">Terminal panel</label>
+        <div class="range"><input id="op-term" type="range" min="0" max="100" step="1"><output id="op-term-out"></output></div></div>
+      <div class="row"><label for="op-side">Sidebar</label>
+        <div class="range"><input id="op-side" type="range" min="0" max="100" step="1"><output id="op-side-out"></output></div></div>
+    </section>
+
+    <!-- ===== FONT ===== -->
+    <section data-panel="font">
+      <div class="row"><label for="font-family">Font</label><select id="font-family"></select></div>
+      <div class="row"><label for="font-custom">Or type any installed font</label>
+        <input id="font-custom" type="text" placeholder="e.g. Comic Mono" spellcheck="false"></div>
+      <div class="row"><label>Use your own font file</label>
+        <div class="btn-row"><button id="add-font" class="btn">Add font file…</button>
+          <input id="font-file" type="file" accept=".ttf,.otf,.woff,.woff2" hidden></div></div>
+      <p class="hint">Monospace fonts, where every letter has the same width, line up best in a terminal.</p>
+      <div id="font-note" class="hint"></div>
+
+      <h3>Size and spacing</h3>
+      <div class="row"><label for="font-size">Size</label>
+        <div class="range"><input id="font-size" type="range" min="8" max="36" step="1"><output id="font-size-out"></output></div></div>
+      <div class="row"><label for="font-weight">Weight</label>
+        <select id="font-weight"><option value="300">Light</option><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option></select></div>
+      <div class="row"><label for="font-bold">Bold text</label>
+        <select id="font-bold"><option value="600">Semibold</option><option value="700">Bold</option><option value="800">Extra bold</option><option value="900">Black</option></select></div>
+      <div class="row"><label for="font-lh">Line height</label>
+        <div class="range"><input id="font-lh" type="range" min="1" max="2" step="0.05"><output id="font-lh-out"></output></div></div>
+      <div class="row"><label for="font-ls">Letter spacing</label>
+        <div class="range"><input id="font-ls" type="range" min="-2" max="8" step="1"><output id="font-ls-out"></output></div></div>
+
+      <h3>Cursor</h3>
+      <div class="row"><label for="cur-style">Style</label>
+        <select id="cur-style"><option value="block">Block</option><option value="bar">Bar</option><option value="underline">Underline</option></select></div>
+      <div class="row"><label for="cur-blink">Blinking</label>
+        <label class="switch"><input id="cur-blink" type="checkbox"><span></span></label></div>
+    </section>
+
+    <!-- ===== TERMINAL ===== -->
+    <section data-panel="terminal">
+      <h3>Scrolling</h3>
+      <div class="row"><label for="set-scrollback">History kept per tab<small>Lines you can scroll back through</small></label>
+        <div class="range"><input id="set-scrollback" type="range" min="1000" max="100000" step="1000"><output id="set-scrollback-out"></output></div></div>
+      <div class="row"><label for="set-scrollspeed">Mouse wheel speed</label>
+        <div class="range"><input id="set-scrollspeed" type="range" min="0.5" max="5" step="0.5"><output id="set-scrollspeed-out"></output></div></div>
+      <div class="row"><label for="set-scrollinput">Jump to the bottom when you type</label>
+        <label class="switch"><input id="set-scrollinput" type="checkbox"><span></span></label></div>
+
+      <h3>Selection and clipboard</h3>
+      <div class="row"><label for="set-copysel">Copy text as soon as you select it</label>
+        <label class="switch"><input id="set-copysel" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-rclick">Right-click</label>
+        <select id="set-rclick"><option value="smart">Copy the selection, or paste</option><option value="menu">Show a menu</option></select></div>
+      <div class="row"><label for="set-confirmpaste">Ask before pasting several lines</label>
+        <label class="switch"><input id="set-confirmpaste" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-wordsep">Word separators<small>Characters that end a word on double-click</small></label>
+        <input id="set-wordsep" type="text" spellcheck="false"></div>
+
+      <h3>Text</h3>
+      <div class="row"><label for="set-contrast">Minimum contrast<small>Raises the contrast of hard-to-read colors. 1 = off</small></label>
+        <div class="range"><input id="set-contrast" type="range" min="1" max="21" step="0.5"><output id="set-contrast-out"></output></div></div>
+      <div class="row"><label for="set-boldbright">Bold text uses the bright colors</label>
+        <label class="switch"><input id="set-boldbright" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-unicode">Emoji and wide characters</label>
+        <select id="set-unicode"><option value="11">Unicode 11 (recommended)</option><option value="6">Unicode 6 (older programs)</option></select></div>
+      <div class="row"><label for="set-cursorinactive">Cursor when the window is in the background</label>
+        <select id="set-cursorinactive"><option value="outline">Outline</option><option value="block">Block</option><option value="bar">Bar</option><option value="underline">Underline</option><option value="none">Hidden</option></select></div>
+
+      <h3>Links</h3>
+      <div class="row"><label for="set-linkctrl">Hold Ctrl to open links<small>Web links in the output open in your browser</small></label>
+        <label class="switch"><input id="set-linkctrl" type="checkbox"><span></span></label></div>
+    </section>
+
+    <!-- ===== SOUNDS ===== -->
+    <section data-panel="sounds">
+      <div class="row"><label for="set-sound">Play a sound when a command finishes</label>
+        <label class="switch"><input id="set-sound" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-vol">Volume</label>
+        <div class="range"><input id="set-vol" type="range" min="0" max="100" step="1"><output id="set-vol-out"></output></div></div>
+      <div class="row"><label>Preview</label>
+        <div class="btn-row"><button id="test-ok" class="btn">Success</button><button id="test-fail" class="btn">Failure</button><button id="test-ask" class="btn">Question</button></div></div>
+
+      <h3>Claude Code and Codex</h3>
+      <p class="hint">Play a sound when a run finishes in a Belor tab, and the softer double ping when it asks you a question or needs permission.</p>
+      <div class="row"><label>Claude Code<small id="agent-claude-note"></small></label><button id="agent-claude" class="btn"></button></div>
+      <div class="row"><label>Codex<small id="agent-codex-note"></small></label><button id="agent-codex" class="btn"></button></div>
+      <div class="row"><label for="set-idle">Mark a run done when the tool goes quiet<small>A backup for when no hook reports it. Waits 4 seconds of silence.</small></label>
+        <label class="switch"><input id="set-idle" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-bell">Ping when a program rings the terminal bell<small>Codex uses this for its questions. Turned on with Codex.</small></label>
+        <label class="switch"><input id="set-bell" type="checkbox"><span></span></label></div>
+      <p class="hint">Turning one on adds a small entry to Claude Code's <code>settings.json</code> or Codex's <code>config.toml</code>, and saves a backup next to the file. Turning it off removes only that entry. Restart Claude Code or Codex afterwards. Works in PowerShell, Command Prompt and Git Bash tabs, not WSL tabs.</p>
+      <p id="agent-msg" class="hint"></p>
+
+      <h3>Popup notifications</h3>
+      <p class="hint">A desktop popup when the window is minimized or behind other apps. Clicking it brings that tab forward. The taskbar button also flashes.</p>
+      <div class="row"><label for="set-notify">Show popups</label>
+        <label class="switch"><input id="set-notify" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-notify-done">When something finishes</label>
+        <label class="switch"><input id="set-notify-done" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-notify-fail">When something fails</label>
+        <label class="switch"><input id="set-notify-fail" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-notify-ask">When it needs you<small>A question or permission prompt</small></label>
+        <label class="switch"><input id="set-notify-ask" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-notify-min">Commands that ran at least<small>Shorter ones stay quiet. Claude Code and Codex always notify.</small></label>
+        <div class="range"><input id="set-notify-min" type="range" min="0" max="60" step="1"><output id="set-notify-min-out"></output></div></div>
+      <div class="row"><label>Try it</label><div class="btn-row"><button id="test-notify" class="btn">Send a test popup</button></div></div>
+      <p id="notify-msg" class="hint"></p>
+    </section>
+
+    <!-- ===== GENERAL ===== -->
+    <section data-panel="general">
+      <h3>New tabs</h3>
+      <div class="row"><label for="set-shell">Default shell</label><select id="set-shell"></select></div>
+      <div class="row"><label for="set-startdir">Start in</label>
+        <select id="set-startdir"><option value="home">Your home folder</option><option value="custom">A folder I choose</option></select></div>
+      <div class="row" id="row-startpath"><label for="set-startpath">Folder</label><input id="set-startpath" type="text" placeholder="C:\Users\you\Projects" spellcheck="false"></div>
+
+      <h3>Window</h3>
+      <div class="row"><label for="set-ontop">Keep on top of other windows</label>
+        <label class="switch"><input id="set-ontop" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-winop">Window opacity</label>
+        <div class="range"><input id="set-winop" type="range" min="40" max="100" step="1"><output id="set-winop-out"></output></div></div>
+      <div class="row"><label for="set-confirmclose">Ask before closing when tabs are open</label>
+        <label class="switch"><input id="set-confirmclose" type="checkbox"><span></span></label></div>
+
+      <h3>Starting up</h3>
+      <div class="row"><label for="set-restore">Reopen the tabs I had last time<small>Same shells and folders. Administrator tabs are not reopened.</small></label>
+        <label class="switch"><input id="set-restore" type="checkbox"><span></span></label></div>
+
+      <h3>Shortcuts</h3>
+      <dl class="keys">
+        <dt>New tab</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>T</kbd></dd>
+        <dt>New administrator tab</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></dd>
+        <dt>Close tab</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>W</kbd></dd>
+        <dt>Find in the tab</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>F</kbd></dd>
+        <dt>Clear the tab</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>K</kbd></dd>
+        <dt>Zoom in / out / reset</dt><dd><kbd>Ctrl</kbd><kbd>+</kbd> <kbd>Ctrl</kbd><kbd>-</kbd> <kbd>Ctrl</kbd><kbd>0</kbd></dd>
+        <dt>Full screen</dt><dd><kbd>F11</kbd></dd>
+        <dt>Next / previous tab</dt><dd><kbd>Ctrl</kbd><kbd>Tab</kbd></dd>
+        <dt>Collapse sidebar</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>B</kbd></dd>
+        <dt>Copy / paste</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>C</kbd> <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>V</kbd></dd>
+        <dt>Settings</dt><dd><kbd>Ctrl</kbd><kbd>,</kbd></dd>
+      </dl>
+      <h3>Reset</h3>
+      <div class="row"><label>Put the theme, background, fonts and cursor back to the defaults</label>
+        <button id="reset-look" class="btn">Reset look</button></div>
+      <p id="about" class="about"></p>
+    </section>
+  </div>
+</aside>
+
+<script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="../../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
+<script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+<script src="../../node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js"></script>
+<script src="icons.js"></script>
+<script src="themes.js"></script>
+<script src="sounds.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
