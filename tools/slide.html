@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Belor slide</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1600px; height: 900px; overflow: hidden; background: #070a14; font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; color: #fff; }
+  .bg { position: absolute; inset: 0;
+    background:
+      radial-gradient(900px 620px at 82% 40%, rgba(124, 77, 255, .38), transparent 62%),
+      radial-gradient(800px 560px at 4% 96%, rgba(78, 140, 255, .30), transparent 62%),
+      radial-gradient(640px 360px at 50% -8%, rgba(40, 200, 220, .16), transparent 60%),
+      linear-gradient(160deg, #05070f, #0a1022 55%, #090c18); }
+  .grid { position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(130, 170, 255, .06) 1px, transparent 1px), linear-gradient(90deg, rgba(130, 170, 255, .06) 1px, transparent 1px);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(ellipse 80% 90% at 50% 50%, #000 28%, transparent 80%); }
+  .top { position: absolute; left: 84px; right: 84px; top: 52px; display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 16px; font-size: 26px; font-weight: 800; letter-spacing: .3em; color: #cfe0ff; }
+  .brand img { width: 52px; height: 52px; filter: drop-shadow(0 0 16px rgba(110, 130, 255, .7)); }
+  .count { font-size: 22px; letter-spacing: .2em; color: #7f8db3; font-variant-numeric: tabular-nums; }
+  .count b { color: #cfe0ff; }
+  .copy { position: absolute; top: 190px; width: 560px; }
+  .kicker { display: inline-block; font-size: 19px; font-weight: 800; letter-spacing: .22em; padding: 9px 18px; border-radius: 999px; border: 1.5px solid rgba(143, 192, 255, .7); color: #cfe3ff; background: rgba(60, 100, 200, .16); }
+  h1 { font-size: 70px; line-height: 1.04; font-weight: 800; margin-top: 28px; letter-spacing: -.01em; background: linear-gradient(95deg, #ffffff 30%, #b9c9ff 70%, #cdb4ff); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: 0 6px 40px rgba(0, 0, 0, .5); }
+  p { font-size: 30px; line-height: 1.38; margin-top: 26px; color: #a9b6d6; }
+  .shot { position: absolute; top: 138px; width: 880px; }
+  .shot img { display: block; width: 100%; border-radius: 16px; border: 1px solid rgba(160, 190, 255, .32);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .05), 0 44px 100px rgba(0, 0, 0, .65), 0 0 130px rgba(100, 120, 255, .42); }
+  .R .copy { left: 84px; } .R .shot { right: 70px; transform: perspective(1700px) rotateY(-7deg) rotateX(2deg); }
+  .L .copy { right: 84px; } .L .shot { left: 70px; transform: perspective(1700px) rotateY(7deg) rotateX(2deg); }
+  .foot { position: absolute; left: 84px; bottom: 44px; font-size: 21px; color: #7f8db3; letter-spacing: .06em; }
+  .foot b { color: #cfe0ff; }
+  .dots { position: absolute; right: 84px; bottom: 50px; display: flex; gap: 10px; }
+  .dots i { width: 12px; height: 12px; border-radius: 50%; background: rgba(150, 175, 255, .25); }
+  .dots i.on { width: 34px; border-radius: 8px; background: linear-gradient(90deg, #7fb2ff, #b89cff); }
+</style>
+</head>
+<body>
+  <div class="bg"></div><div class="grid"></div>
+  <div id="root"></div>
+<script>
+  const o = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+  document.body.classList.add(o.side === 'L' ? 'L' : 'R');
+  const dots = Array.from({ length: o.n }, (_, i) => `<i class="${i + 1 === o.i ? 'on' : ''}"></i>`).join('');
+  document.getElementById('root').innerHTML = `
+    <div class="top"><div class="brand"><img src="../build/icon.png" alt="">BELOR</div><div class="count"><b>${String(o.i).padStart(2, '0')}</b> / ${String(o.n).padStart(2, '0')}</div></div>
+    <div class="copy"><span class="kicker">${o.k}</span><h1>${o.t}</h1><p>${o.s}</p></div>
+    <div class="shot"><img src="${o.img}" alt=""></div>
+    <div class="foot"><b>github.com/sudheer-050/belor</b> &nbsp;·&nbsp; Windows 10 and 11 &nbsp;·&nbsp; MIT</div>
+    <div class="dots">${dots}</div>`;
+</script>
+</body>
+</html>
