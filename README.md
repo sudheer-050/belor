@@ -137,7 +137,7 @@ Running several builds, servers and AI coding sessions at once means constantly 
 
 **Requirements:** Windows 10 or 11 (x64).
 
-1. Download **`Belor Setup 0.7.0.exe`** from the [Releases](../../releases) page.
+1. Download **`Belor.Setup.0.7.0.exe`** from the [Releases](../../releases) page.
 2. Run it. It installs per user and needs no administrator rights.
 3. Open **Belor** from the Start menu or the desktop shortcut.
 
