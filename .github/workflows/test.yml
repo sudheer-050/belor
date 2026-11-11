@@ -1,0 +1,25 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies (skip native downloads, the tests below need none)
+        run: npm ci --ignore-scripts
+      - name: Syntax check every script
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse -Include *.js -Path src, tools, test | ForEach-Object {
+            node --check $_.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Syntax error in $($_.FullName)" }
+          }
+      - name: Claude Code and Codex config editing tests
+        run: node test/agent-setup.js

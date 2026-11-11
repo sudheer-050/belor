@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Belor banner</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1600px; height: 800px; overflow: hidden; background: #070a14; font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif; color: #fff; }
+  .bg { position: absolute; inset: 0;
+    background:
+      radial-gradient(1000px 640px at 80% 38%, rgba(124, 77, 255, .42), transparent 62%),
+      radial-gradient(900px 620px at 6% 96%, rgba(78, 140, 255, .34), transparent 62%),
+      radial-gradient(700px 400px at 52% -6%, rgba(40, 200, 220, .18), transparent 60%),
+      linear-gradient(160deg, #05070f, #0a1022 55%, #090c18); }
+  .grid { position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(130, 170, 255, .07) 1px, transparent 1px), linear-gradient(90deg, rgba(130, 170, 255, .07) 1px, transparent 1px);
+    background-size: 52px 52px;
+    -webkit-mask-image: radial-gradient(ellipse 75% 85% at 50% 50%, #000 30%, transparent 78%); mask-image: radial-gradient(ellipse 75% 85% at 50% 50%, #000 30%, transparent 78%); }
+  .streak { position: absolute; height: 3px; border-radius: 3px; filter: blur(.4px); opacity: .85; }
+  .copy { position: absolute; left: 86px; top: 84px; width: 800px; }
+  .mark { display: flex; align-items: center; gap: 22px; margin-bottom: 6px; }
+  .mark img { width: 104px; height: 104px; filter: drop-shadow(0 0 26px rgba(110, 130, 255, .75)); }
+  .badge { font-size: 19px; font-weight: 700; letter-spacing: .22em; padding: 9px 18px; border-radius: 999px; border: 1.5px solid rgba(143, 192, 255, .7); color: #cfe3ff; background: rgba(60, 100, 200, .16); }
+  h1 { font-size: 196px; line-height: .98; font-weight: 900; letter-spacing: 10px; margin-left: -6px; color: transparent;
+    -webkit-text-stroke: 5px #a5c9ff;
+    filter: drop-shadow(0 0 14px rgba(91, 157, 255, .95)) drop-shadow(0 0 52px rgba(124, 77, 255, .8)); }
+  .tag { font-size: 36px; line-height: 1.16; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; margin-top: 18px; text-shadow: 0 4px 30px rgba(0, 0, 0, .6); }
+  .tag b { background: linear-gradient(90deg, #7fb2ff, #c3a4ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 22px; color: #a9b6d6; margin-top: 18px; letter-spacing: .01em; }
+  .pills { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; width: 740px; }
+  .pill { font-size: 18px; font-weight: 700; letter-spacing: .08em; padding: 11px 20px; border-radius: 999px; background: rgba(20, 28, 54, .75); border: 1.5px solid rgba(130, 170, 255, .42); color: #dbe7ff; box-shadow: 0 0 22px rgba(80, 120, 255, .16) inset; }
+  .pill.hot { border-color: rgba(190, 150, 255, .75); color: #efe4ff; }
+  .shot { position: absolute; left: 868px; top: 118px; width: 700px; transform: perspective(1500px) rotateY(-11deg) rotateX(3deg); transform-origin: left center; }
+  .shot img { display: block; width: 100%; border-radius: 14px; border: 1px solid rgba(160, 190, 255, .3);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .05), 0 40px 90px rgba(0, 0, 0, .65), 0 0 120px rgba(100, 120, 255, .45); }
+  .chip { position: absolute; display: flex; align-items: center; gap: 12px; padding: 13px 22px; border-radius: 16px; font-size: 24px; font-weight: 700; background: rgba(10, 14, 30, .88); border: 1.5px solid; backdrop-filter: blur(6px); box-shadow: 0 14px 40px rgba(0, 0, 0, .55); }
+  .chip i { font-style: normal; font-size: 28px; }
+  .ok { color: #8de6a6; border-color: rgba(141, 230, 166, .7); box-shadow: 0 0 30px rgba(141, 230, 166, .3), 0 14px 40px rgba(0, 0, 0, .55); }
+  .bad { color: #ff9a96; border-color: rgba(255, 154, 150, .7); box-shadow: 0 0 30px rgba(255, 154, 150, .3), 0 14px 40px rgba(0, 0, 0, .55); }
+  .run { color: #ffd479; border-color: rgba(255, 212, 121, .7); box-shadow: 0 0 30px rgba(255, 212, 121, .26), 0 14px 40px rgba(0, 0, 0, .55); }
+  .ask { color: #d2b4ff; border-color: rgba(210, 180, 255, .75); box-shadow: 0 0 30px rgba(190, 150, 255, .34), 0 14px 40px rgba(0, 0, 0, .55); }
+  .foot { position: absolute; left: 86px; bottom: 34px; font-size: 21px; color: #7f8db3; letter-spacing: .06em; }
+  .foot b { color: #cfe0ff; }
+</style>
+</head>
+<body>
+  <div class="bg"></div><div class="grid"></div>
+  <div class="streak" style="left:-40px;top:612px;width:520px;background:linear-gradient(90deg,transparent,#4e8cff 60%,#9fd0ff);transform:rotate(-12deg)"></div>
+  <div class="streak" style="left:1040px;top:726px;width:620px;background:linear-gradient(90deg,transparent,#7c4dff 60%,#d2b4ff);transform:rotate(-8deg)"></div>
+  <div class="streak" style="left:1180px;top:64px;width:460px;height:2px;background:linear-gradient(90deg,transparent,#28c8dc 70%,#b7f3ff);transform:rotate(14deg)"></div>
+
+  <div class="copy">
+    <div class="mark"><img src="../build/icon.png" alt=""><span class="badge">FOR WINDOWS</span></div>
+    <h1>BELOR</h1>
+    <div class="tag">One window for all your <b>terminals</b><br>and <b>AI coding assistants</b></div>
+    <div class="sub">See what every tab is doing. Know when Claude Code or Codex needs you.</div>
+    <div class="pills">
+      <span class="pill hot">CLAUDE CODE</span><span class="pill hot">CODEX</span><span class="pill">ADMIN TABS</span>
+      <span class="pill">SOUNDS + POPUPS</span><span class="pill">11 THEMES</span><span class="pill">OPEN SOURCE</span>
+    </div>
+  </div>
+
+  <div class="shot"><img src="../docs/screenshots/hero-dark.png" alt=""></div>
+  <div class="chip ok" style="left:1262px;top:292px"><i>✓</i> Completed</div>
+  <div class="chip bad" style="left:1348px;top:96px"><i>✕</i> Failed</div>
+  <div class="chip run" style="left:1340px;top:516px"><i>◌</i> Running</div>
+  <div class="chip ask" style="left:1180px;top:404px"><i>?</i> Needs you</div>
+  <div class="foot"><b>github.com/sudheer-050/belor</b> &nbsp;·&nbsp; MIT licensed &nbsp;·&nbsp; Windows 10 and 11</div>
+</body>
+</html>

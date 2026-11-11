@@ -1256,5 +1256,5 @@
   }
   if (!tabs.size) await openTab(settings.defaultShell);
   window.addEventListener('beforeunload', () => persistSession(true));
-  if (location.search.includes('selftest')) window.__st = { tabs, settings };   // test hook, only when the app runs in self-test mode
+  if (location.search.includes('selftest')) window.__st = { tabs, settings, setState };   // test hook, only when the app runs in self-test mode
 })();

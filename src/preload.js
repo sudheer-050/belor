@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('term', {
   notify: (o) => ipcRenderer.invoke('notify:show', o),
   onNotifyClick: (cb) => ipcRenderer.on('notify:click', (_e, tabId) => cb(tabId)),
   testMinimize: () => ipcRenderer.invoke('test:minimize'),        // only answers in self-test mode
+  recStart: () => ipcRenderer.send('rec:start'),                  // demo recording, only acts in self-test mode
+  recStop: () => ipcRenderer.send('rec:stop'),
   setPrefs: (p) => ipcRenderer.send('app:prefs', p),
   toggleFullscreen: () => ipcRenderer.send('win:fullscreen'),
   agentStatus: () => ipcRenderer.invoke('agent:status'),

@@ -219,7 +219,8 @@ function saveBounds() {
 function createWindow() {
   const saved = loadBounds();
   win = new BrowserWindow({
-    width: saved.width || 1200, height: saved.height || 760,
+    width: process.env.ST_WINDOW ? +process.env.ST_WINDOW.split('x')[0] : saved.width || 1200,
+    height: process.env.ST_WINDOW ? +process.env.ST_WINDOW.split('x')[1] : saved.height || 760,
     x: saved.x, y: saved.y,
     minWidth: 720, minHeight: 420,
     backgroundColor: THEMES.dark.color,
@@ -264,6 +265,26 @@ function createWindow() {
 
   // Dev self-test: ST_SELFTEST=<png path> runs ST_SELFTEST_EXTRA in the page, saves a screenshot, then quits.
   if (process.env.ST_SELFTEST) {
+    // Demo recording (tools/record-demo): ST_RECORD=<folder> saves frames of the window while the page runs a scripted session.
+    if (process.env.ST_RECORD) {
+      const dir = process.env.ST_RECORD;
+      fs.mkdirSync(dir, { recursive: true });
+      const frames = [];
+      let recording = false, n = 0;
+      const grab = async () => {
+        while (recording) {
+          const t = Date.now();
+          const img = await win.webContents.capturePage();
+          const file = `f${String(n++).padStart(5, '0')}.jpg`;
+          fs.writeFileSync(path.join(dir, file), img.resize({ width: 1280, quality: 'best' }).toJPEG(92));
+          frames.push({ file, t });
+          const rest = 100 - (Date.now() - t);
+          if (rest > 0) await new Promise((r) => setTimeout(r, rest));
+        }
+      };
+      ipcMain.on('rec:start', () => { recording = true; grab(); });
+      ipcMain.on('rec:stop', () => { recording = false; setTimeout(() => { fs.writeFileSync(path.join(dir, 'frames.json'), JSON.stringify(frames)); app.quit(); }, 400); });
+    }
     const wait = +process.env.ST_SELFTEST_WAIT || 7000;
     win.webContents.on('did-finish-load', () => {
       setTimeout(() => win.webContents.executeJavaScript(
