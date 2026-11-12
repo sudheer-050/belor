@@ -1,7 +1,7 @@
 {
   "name": "belor",
   "productName": "Belor",
-  "version": "0.7.0",
+  "version": "0.7.4",
   "description": "A Windows terminal for your shells and AI coding assistants: color-coded tabs, Claude Code and Codex awareness, popups and sounds, admin tabs in the same window",
   "author": "Sudheer Kumar Gandiboyana",
   "license": "MIT",
@@ -37,12 +37,14 @@
       "src/**/*",
       "shell/**/*",
       "build/icon.png",
+      "build/icon.ico",
       "package.json",
       "!**/*.map"
     ],
     "asarUnpack": [
       "node_modules/node-pty/**",
-      "shell/**"
+      "shell/**",
+      "build/icon.ico"
     ],
     "win": {
       "target": [
@@ -53,7 +55,7 @@
           ]
         }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,

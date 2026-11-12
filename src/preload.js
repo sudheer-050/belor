@@ -2,6 +2,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('term', {
   info: () => ipcRenderer.invoke('app:info'),
+  activeSessions: () => ipcRenderer.invoke('resume:active'),
+  terminalWindows: () => ipcRenderer.invoke('terminals:windows'),
+  resumeTerminalWindow: (key) => ipcRenderer.invoke('terminals:resume-window', key),
+  onShown: (cb) => ipcRenderer.on('win:shown', cb),
   create: (opts) => ipcRenderer.invoke('pty:create', opts),
   write: (id, data) => ipcRenderer.send('pty:write', id, data),
   resize: (id, cols, rows) => ipcRenderer.send('pty:resize', id, cols, rows),

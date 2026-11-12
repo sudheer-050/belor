@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Notification, shell: electronShell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Notification, Tray, Menu, nativeImage, shell: electronShell } = require('electron');
 const { execFile, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const net = require('node:net');
@@ -25,6 +25,9 @@ const pty = require('node-pty');
 const { detectShells, ADMIN_KINDS, SHELL_DIR } = require('./shells');
 const { send, lineReader } = require('./jsonlines');
 const agentSetup = require('./agent-setup');
+const resumeTools = require('./resume-tools');
+const activeSessions = require('./active-sessions');
+const { setupBackground } = require('./background');
 
 // ---- events from Claude Code / Codex running inside a tab ----------------------------------
 // Each tab's shell gets BELOR_PIPE / BELOR_TAB / BELOR_TOKEN. A hook in the tool runs st-notify.ps1,
@@ -69,7 +72,8 @@ function startEventServer() {
   server.listen(eventPipe);
 }
 
-const ICON = path.join(__dirname, '..', 'build', 'icon.png');
+const ICON_ICO = path.join(__dirname, '..', 'build', 'icon.ico').replace('app.asar', 'app.asar.unpacked');
+const ICON = fs.existsSync(ICON_ICO) ? ICON_ICO : path.join(__dirname, '..', 'build', 'icon.png');
 const THEMES = {
   dark: { color: '#202124', symbolColor: '#e8eaed' },
   light: { color: '#dfe3e8', symbolColor: '#202124' },
@@ -80,6 +84,7 @@ const ptys = new Map();            // id -> local pty
 const remote = new Map();          // id -> webContents (admin ptys that live in the elevated helper)
 let nextId = 1;
 let win;
+let background;
 let isAdmin = false;
 let closeConfirmed = !!process.env.ST_SELFTEST;   // tests quit without the confirm dialog
 const prefs = { confirmClose: true };      // window preferences the page sends us (see app:prefs)
@@ -101,7 +106,8 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+    if (background) background.show();
+    else if (win) { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
   });
 }
 
@@ -234,25 +240,30 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      backgroundThrottling: false,
     },
   });
   if (saved.maximized) win.maximize();
+  const appIcon = nativeImage.createFromPath(ICON);
+  if (!appIcon.isEmpty()) win.setIcon(appIcon);
+  if (process.platform === 'win32') win.setAppDetails({ appId: 'com.belor.app', appIconPath: ICON, appIconIndex: 0, relaunchDisplayName: 'Belor' });
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
   win.on('focus', () => win.flashFrame(false));
-  win.on('close', (e) => {
+  const confirmQuit = () => {
     const open = ptys.size + remote.size;
     if (prefs.confirmClose && open > 0 && !closeConfirmed) {
       const choice = dialog.showMessageBoxSync(win, {
-        type: 'question', buttons: ['Close', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
-        title: 'Close Belor', message: 'Close Belor?',
+        type: 'question', buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
+        title: 'Quit Belor', message: 'Quit Belor and stop its terminal sessions?',
         detail: `${open} terminal tab${open === 1 ? ' is' : 's are'} still open. Programs running in ${open === 1 ? 'it' : 'them'} will be stopped.`,
       });
-      if (choice !== 0) { e.preventDefault(); return; }
+      if (choice !== 0) return false;
       closeConfirmed = true;
     }
-    saveBounds();
-  });
+    return true;
+  };
+  background = setupBackground({ app, win, Tray, Menu, icon: appIcon, confirmQuit, saveBounds });
 
   win.webContents.on('render-process-gone', (_e, d) => console.error('[renderer gone]', d.reason, d.exitCode));
   win.webContents.on('console-message', (_e, level, message, line, src) => {
@@ -314,12 +325,46 @@ const assetDir = (kind) => path.join(app.getPath('userData'), ASSET_KINDS[kind].
 const SAFE_ASSET_NAME = /^[0-9a-f]{32}\.[a-z0-9]{2,5}$/;
 
 // ---- IPC ----------------------------------------------------------------------------------
+let activeSessionScan = null;
+const automaticSessions = new Map();
+const runningWindows = new Map();
+const windowConversations = new Map();
+function discoverRunningTerminals() {
+  if (!activeSessionScan) {
+    activeSessionScan = activeSessions.readSnapshot().then(snapshot => {
+        const excluded = [process.pid, helper?.pid, ...[...ptys.values()].map(p => p.pid)];
+        const sessions = activeSessions.select(snapshot, excluded);
+        const installed = new Set(resumeTools.detect().map(tool => tool.id));
+        automaticSessions.clear();
+        for (const session of sessions) {
+          if (installed.has(session.toolId) && fs.existsSync(session.cwd)) automaticSessions.set(session.key, session);
+        }
+        runningWindows.clear();
+        for (const window of activeSessions.selectWindows(snapshot, excluded)) runningWindows.set(window.key, window);
+        return { sessions: [...automaticSessions.values()], windows: [...runningWindows.values()] };
+      }).finally(() => { activeSessionScan = null; });
+  }
+  return activeSessionScan;
+}
+ipcMain.handle('resume:active', async () => (await discoverRunningTerminals()).sessions);
+ipcMain.handle('terminals:windows', async () => (await discoverRunningTerminals()).windows);
+ipcMain.handle('terminals:resume-window', async (_event, key) => {
+  const terminalWindow = runningWindows.get(key);
+  if (!terminalWindow) throw new Error('That terminal window has closed. The sidebar will refresh automatically.');
+  const session = require('./window-conversation').resolve(terminalWindow.title);
+  if (!session) throw new Error('No unique saved Codex conversation matches this window. Use New tab > Resume Codex session to select your conversation.');
+  if (!resumeTools.detect().some(tool => tool.id === session.toolId)) throw new Error('Install the Codex command-line application to continue this conversation in Belor.');
+  if (!fs.existsSync(session.cwd)) throw new Error('The saved project folder is no longer available.');
+  windowConversations.set(session.key, session);
+  return session;
+});
 ipcMain.handle('app:info', () => {
   for (const k of Object.keys(ASSET_KINDS)) fs.mkdirSync(assetDir(k), { recursive: true });
   return {
     isAdmin,
     version: app.getVersion(),
     shells: shells.map(({ id, label, kind }) => ({ id, label, kind, adminOk: ADMIN_KINDS.has(kind) })),
+    resumeTools: resumeTools.detect().map(({ id, label }) => ({ id, label })),
     home: app.getPath('home'),
     windowsBuild: parseInt(os.release().split('.')[2], 10) || 19045,   // xterm needs it to wrap ConPTY lines correctly
     assetBase: Object.fromEntries(Object.keys(ASSET_KINDS).map((k) => [k, pathToFileURL(assetDir(k)).href + '/'])),
@@ -345,8 +390,17 @@ ipcMain.handle('asset:delete', (_e, { kind, file }) => {
 });
 if (process.env.ST_SELFTEST) ipcMain.handle('test:readFile', (_e, p) => fs.readFileSync(p));   // test-only
 
-ipcMain.handle('pty:create', async (event, { shellId, cols, rows, cwd, admin }) => {
-  const sh = shells.find((s) => s.id === shellId) || shells[0];
+ipcMain.handle('pty:create', async (event, { shellId, cols, rows, cwd, admin, resumeTool, autoSessionKey }) => {
+  let resumeSession;
+  if (autoSessionKey) {
+    const session = automaticSessions.get(autoSessionKey) || windowConversations.get(autoSessionKey);
+    if (!session) throw new Error('That running session is no longer available.');
+    resumeTool = session.toolId; resumeSession = session.sessionId; cwd = session.cwd;
+  }
+  const resume = resumeTool ? resumeTools.detect().find(tool => tool.id === resumeTool) : null;
+  if (resumeTool && !resume) throw new Error('That application is no longer installed. Restart Belor after installing it.');
+  if (resume && admin) throw new Error('Resume the application in a regular terminal.');
+  const sh = resume ? shells.find(s => s.id === 'powershell') : shells.find((s) => s.id === shellId) || shells[0];
   const id = nextId++;
   const c = Math.max(2, cols | 0), r = Math.max(1, rows | 0);
   const startDir = typeof cwd === 'string' && cwd && fs.existsSync(cwd) ? cwd : app.getPath('home');
@@ -362,7 +416,7 @@ ipcMain.handle('pty:create', async (event, { shellId, cols, rows, cwd, admin }) 
     return id;
   }
 
-  const p = pty.spawn(sh.file, sh.args, {
+  const p = pty.spawn(sh.file, resume ? resumeTools.launch(resume, resumeSession) : sh.args, {
     name: 'xterm-256color', cols: c, rows: r, cwd: startDir,
     env: { ...process.env, ...(sh.env || {}), TERM_PROGRAM: 'belor', ...agentEnv(id) },
     useConpty: true,
@@ -399,8 +453,8 @@ const shownNotes = new Map();                                       // tab id ->
 const windowAway = () => !win || win.isDestroyed() || win.isMinimized() || !win.isVisible() || !win.isFocused();
 function bringToFront(tabId) {
   if (!win || win.isDestroyed()) return;
-  if (win.isMinimized()) win.restore();
-  win.show(); win.focus();
+  if (background) background.show();
+  else { if (win.isMinimized()) win.restore(); win.show(); win.focus(); }
   win.flashFrame(false);
   if (Number.isInteger(tabId)) win.webContents.send('notify:click', tabId);
 }

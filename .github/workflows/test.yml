@@ -23,3 +23,15 @@ jobs:
           }
       - name: Claude Code and Codex config editing tests
         run: node test/agent-setup.js
+      - name: Native application resume launch checks
+        run: node test/resume-tools.js
+      - name: Automatic running-session selection checks
+        run: node test/active-sessions.js
+      - name: Window conversation matching checks
+        run: node test/window-conversation.js
+      - name: External terminal sidebar activation checks
+        run: node test/terminal-window-sidebar.js
+      - name: Close-to-tray and explicit quit checks
+        run: node test/background.js
+      - name: Native process and saved-session ownership checks
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/active-sessions-native.ps1

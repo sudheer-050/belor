@@ -441,7 +441,7 @@
   function persistSession(now) {
     clearTimeout(sessionTimer);
     const write = () => {
-      const list = orderedIds().map((id) => tabs.get(id)).filter((t) => t && !t.admin);
+      const list = orderedIds().map((id) => tabs.get(id)).filter((t) => t && !t.admin && !t.autoSessionKey);
       settings.startup.session = list.map((t) => ({ shellId: t.shell.id, cwd: isRemoteish(t) ? '' : t.cwd || '' }));
       settings.startup.active = Math.max(0, list.findIndex((t) => t.id === activeId));
       saveSettings();
@@ -450,10 +450,10 @@
   }
   const startDir = () => (settings.startup.dirMode === 'custom' && settings.startup.dir.trim() ? settings.startup.dir.trim() : undefined);
 
-  function orderedIds() { return [...tabsEl.children].map((el) => +el.dataset.id); }
+  function orderedIds() { return [...tabsEl.children].filter(el => el.dataset.id !== undefined).map((el) => +el.dataset.id); }
 
   async function openTab(shellId, opts = {}) {
-    const shell = info.shells.find((s) => s.id === shellId) || info.shells[0];
+    const shell = info.shells.find((s) => s.id === (opts.resumeTool ? 'powershell' : shellId)) || info.shells[0];
     const admin = !!opts.admin || info.isAdmin;
     const cwd = opts.cwd === undefined ? startDir() : opts.cwd;
     const el = document.createElement('div');
@@ -475,7 +475,7 @@
 
     let id;
     try {
-      id = await window.term.create({ shellId: shell.id, cols: term.cols, rows: term.rows, cwd, admin: !!opts.admin });
+      id = await window.term.create({ shellId: shell.id, cols: term.cols, rows: term.rows, cwd, admin: !!opts.admin, resumeTool: opts.resumeTool, autoSessionKey: opts.autoSessionKey });
     } catch (err) {
       term.dispose(); el.remove();          // e.g. the Windows administrator prompt was declined
       toast(cleanErr(err));
@@ -496,10 +496,10 @@
     tabsEl.appendChild(tabEl);
 
     const tab = {
-      id, shell, el, term, fit, search, tabEl, admin, cwd: cwd || '', userTitle: '',
+      id, shell, el, term, fit, search, tabEl, admin, autoSessionKey: opts.autoSessionKey || '', cwd: cwd || '', userTitle: (info.resumeTools || []).find(tool => tool.id === opts.resumeTool)?.label || '',
       titleEl: tabEl.querySelector('.ttitle'), subEl: tabEl.querySelector('.tsub'), statusEl: tabEl.querySelector('.tstatus'),
       line: '', dirty: false, pending: false, outBuf: '', tail: '', seenFirstPrompt: false,
-      state: 'empty', running: false, runTimer: null, agent: null, lastOut: 0,
+      state: 'empty', running: false, runTimer: null, agent: opts.resumeTool || null, lastOut: 0,
     };
     tabs.set(id, tab);
     counter++;
@@ -575,7 +575,7 @@
     el.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); zoom(e.deltaY < 0 ? 1 : -1); } }, { passive: false, capture: true });
 
     wireTabEl(tab);
-    activate(id);
+    if (opts.activate !== false) activate(id);
     return id;
   }
 
@@ -712,6 +712,22 @@
       b.innerHTML = `<span class="ticon mini k-${s.kind}">${KIND_LABEL[s.kind] || 'SH'}</span><span>${s.label}</span>${s.id === settings.defaultShell ? `<span class="check">${ICONS.check}</span>` : ''}`;
       b.addEventListener('click', () => { closePopups(); openTab(s.id); });
       newMenu.appendChild(b);
+    }
+    if (info.resumeTools?.length) {
+      newMenu.appendChild(document.createElement('hr'));
+      const head = document.createElement('div');
+      head.className = 'menu-head'; head.textContent = 'Continue saved work'; newMenu.appendChild(head);
+      for (const tool of info.resumeTools) {
+        const button = document.createElement('button');
+        button.setAttribute('role', 'menuitem');
+        button.textContent = `Resume ${tool.label} session…`;
+        button.addEventListener('click', () => {
+          closePopups();
+          const current = tabs.get(activeId);
+          openTab('powershell', { resumeTool: tool.id, cwd: current && !isRemoteish(current) ? current.cwd || startDir() : startDir() });
+        });
+        newMenu.appendChild(button);
+      }
     }
     if (!info.isAdmin) {
       newMenu.appendChild(document.createElement('hr'));
@@ -1255,6 +1271,84 @@
     if (ids.length) activate(ids[Math.min(want, ids.length - 1)]);
   }
   if (!tabs.size) await openTab(settings.defaultShell);
+  // Existing native resume menus remain available; identified active sessions open without a picker.
+  const importedSessions = new Set();
+  const windowEntries = new Map(), dismissedWindows = new Set();
+  function syncWindowEntries(windows) {
+    const live = new Set(windows.map(terminalWindow => terminalWindow.key));
+    for (const [key, row] of windowEntries) {
+      if (!live.has(key)) { row.remove(); windowEntries.delete(key); dismissedWindows.delete(key); }
+    }
+    for (const terminalWindow of windows) {
+      if (dismissedWindows.has(terminalWindow.key)) continue;
+      let row = windowEntries.get(terminalWindow.key);
+      if (!row) {
+        row = document.createElement('div');
+        row.className = 'tab external-window'; row.tabIndex = 0;
+        row.setAttribute('role', 'tab'); row.setAttribute('aria-selected', 'false');
+        row.innerHTML = '<span class="ticon k-powershell">WIN</span><span class="tmeta"><span class="ttitle"></span><span class="tsub">Resume saved conversation</span></span><button class="tclose" title="Hide from sidebar" aria-label="Hide terminal window from sidebar">' + ICONS.close + '</button>';
+        let opening = false;
+        const focus = async () => {
+          if (opening) return;
+          opening = true;
+          try {
+            const session = await window.term.resumeTerminalWindow(terminalWindow.key);
+            const existing = [...tabs.values()].find(tab => tab.autoSessionKey === session.key);
+            const id = existing ? existing.id : await openTab('powershell', { resumeTool: session.toolId, autoSessionKey: session.key, cwd: session.cwd });
+            if (id !== null) {
+              activate(id); importedSessions.add(session.key);
+              dismissedWindows.add(terminalWindow.key); row.remove(); windowEntries.delete(terminalWindow.key);
+            }
+          } catch (error) { toast(cleanErr(error)); }
+          finally { opening = false; }
+        };
+        row.addEventListener('click', event => {
+          if (event.target.closest('.tclose')) { dismissedWindows.add(terminalWindow.key); row.remove(); windowEntries.delete(terminalWindow.key); }
+          else focus();
+        });
+        row.addEventListener('keydown', event => { if (event.target === row && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); focus(); } });
+        windowEntries.set(terminalWindow.key, row);
+      }
+      row.querySelector('.ttitle').textContent = terminalWindow.title;
+      row.title = `${terminalWindow.title}\nOpen the saved conversation inside Belor`;
+      tabsEl.appendChild(row);
+    }
+  }
+  let syncingSessions = false, lastSessionError = '', initialSessionScan = true;
+  async function syncRunningSessions() {
+    if (syncingSessions) return;
+    syncingSessions = true;
+    const initialTab = tabs.get(activeId);
+    const canFocus = initialSessionScan && !settings.startup.restore && tabs.size === 1;
+    try {
+      const [sessions, windows] = await Promise.all([window.term.activeSessions(), window.term.terminalWindows()]);
+      syncWindowEntries(windows);
+      lastSessionError = '';
+      let firstNew = null;
+      for (const session of sessions) {
+        if (importedSessions.has(session.key)) continue;
+        const id = await openTab('powershell', { resumeTool: session.toolId, autoSessionKey: session.key, cwd: session.cwd, activate: false });
+        if (id !== null) { importedSessions.add(session.key); firstNew ??= id; }
+      }
+      if (canFocus && firstNew !== null && activeId === initialTab?.id && initialTab.state === 'empty' && !initialTab.line && !initialTab.dirty) activate(firstNew);
+    } catch (error) {
+      const message = cleanErr(error);
+      if (message !== lastSessionError) console.warn('Automatic session reopening:', message);
+      lastSessionError = message;
+    } finally { syncingSessions = false; initialSessionScan = false; }
+  }
+  syncRunningSessions();
+  window.addEventListener('focus', syncRunningSessions);
+  let openingAfterShow = false;
+  window.term.onShown(async () => {
+    if (!tabs.size && !openingAfterShow) {
+      openingAfterShow = true;
+      try { await openTab(settings.defaultShell); } finally { openingAfterShow = false; }
+    }
+    syncRunningSessions();
+  });
+  const runningSessionTimer = setInterval(() => { if (!document.hidden) syncRunningSessions(); }, 10000);
+  window.addEventListener('beforeunload', () => clearInterval(runningSessionTimer));
   window.addEventListener('beforeunload', () => persistSession(true));
   if (location.search.includes('selftest')) window.__st = { tabs, settings, setState };   // test hook, only when the app runs in self-test mode
 })();
