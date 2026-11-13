@@ -24,8 +24,8 @@ function Check-Notification([string]$tool, [string]$json) {
     try {
         $env:BELOR_PIPE = '\\.\pipe\' + $name
         $env:BELOR_TAB = '17'; $env:BELOR_TOKEN = 'isolated-test-token'
-        // A pipe writer flush waits for consumption on Windows. Read concurrently
-        // with the real hook, as the terminal host does, rather than after it returns.
+        # A pipe writer flush waits for consumption on Windows. Read concurrently
+        # with the real hook, as the terminal host does, rather than after it returns.
         $read = [BelorNotificationReader]::Read($server)
         Write-Output 'Checking Codex conversation notification...'
         & $notify -Event done -Tool codex -Rest @($json)
