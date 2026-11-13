@@ -49,7 +49,9 @@ Running several builds, servers and AI coding sessions at once means constantly 
 ### ✅ What Belor Does
 
 * **Shows open terminal windows automatically.** Open terminal windows appear in the same sidebar. Clicking a window resumes its saved Codex conversation inside Belor when its title uniquely matches the local saved-conversation index, including IDE-originated sessions. An already-open conversation tab is selected instead of duplicated. If no unique match exists, Belor explains how to use the manual resume menu; it does not switch to the original window or guess by file date. This resumes saved history, not in-flight commands or the original process. Finish an active turn in the original application before continuing the same conversation in Belor.
-* **Keeps working after the window closes.** The X button hides Belor in the system tray, preserving its terminal processes and alerts. Click the tray logo or use **Show Belor** to return. **Quit Belor** exits and stops Belor-owned terminal sessions, with the existing confirmation preference. This does not enable Windows login autostart.
+* **Move your terminals.** Drag sidebar tabs to reorder them, or drag pane headers to rearrange Grid view. Ctrl+Shift+Up/Down moves a focused sidebar tab. The order is remembered across reopening.
+* **Pop out a terminal.** Use the separate-window button beside the view switch, or right-click a tab and choose **Open in separate window**. It moves the same live terminal into its own window. Close the window or use its return button to bring it back; only **Close tab** ends the session.
+* **Keeps working after the window closes.** The X button hides Belor in the system tray, preserving its terminal processes and alerts. Click the tray logo or use **Show Belor** to return. **Quit Belor** exits the desktop while a separate terminal host keeps its shells, variables, jobs, administrator sessions, and AI applications running. Reopening reconnects to those same processes and replays output produced while away. Only closing the individual tab ends and forgets it. Transcripts remain on disk until the tab is closed; after an update, computer restart, or terminal-host failure, history is retained and uniquely identified Codex/Claude conversations resume automatically by their saved conversation ID. Other terminals reopen as ended sessions because shell processes and variables cannot survive a reboot. Tab restoration is enabled when upgrading from older releases; previous versions saved only tab folders, so they cannot reconstruct a lost conversation-to-tab mapping. This does not enable Windows login autostart.
 * **Automatically reopen identified active sessions.** Belor checks visible terminal hosts at startup, on focus, and every ten seconds while visible. An active Codex or Claude Code session with a positively identified saved conversation opens directly in a regular tab at its saved project folder, without a picker. It excludes background helpers and Belor's own descendants, and opens each conversation only once per app run. Closing that imported tab keeps it dismissed until Belor restarts. Manual resume stays available. This supports resumable Codex/Claude sessions; it cannot transfer arbitrary running PowerShell/CMD jobs or shell variables, and skips sessions whose identity or process access Windows does not expose.
 * **Resume saved work in a real terminal tab.** Open the **New tab** arrow and choose **Resume Codex session** or **Resume Claude Code session**. Belor starts the installed application and its own session picker in a normal terminal tab, using the current tab's project folder. Codex's picker includes sessions across folders. Select a saved session to continue typing, scrolling, and running tools normally. This resumes saved application state; it does not transfer an already-running process, background job, or arbitrary shell variables. Stop or finish an active turn in the original application before resuming the same conversation.
 * **Shows every tab's state.** A spinner while a command runs, a green tick when it completes, a red cross when it fails, a purple question mark when something is waiting for you. A new tab stays plain until something runs in it.
@@ -141,7 +143,7 @@ Running several builds, servers and AI coding sessions at once means constantly 
 
 **Requirements:** Windows 10 or 11 (x64).
 
-1. Download **`Belor.Setup.0.7.0.exe`** from the [Releases](../../releases) page.
+1. Download [**Belor-Setup-0.7.9.exe**](https://github.com/sudheer-050/belor/releases/download/v0.7.9/Belor-Setup-0.7.9.exe).
 2. Run it. It installs per user and needs no administrator rights.
 3. Open **Belor** from the Start menu or the desktop shortcut.
 
@@ -275,8 +277,13 @@ flowchart LR
 | Find in this tab, clear | `Ctrl+Shift+F`, `Ctrl+Shift+K` |
 | Zoom in / out / reset | `Ctrl +`, `Ctrl -`, `Ctrl 0` (or Ctrl + mouse wheel) |
 | Collapse sidebar, full screen | `Ctrl+Shift+B`, `F11` |
+| Expand focused pane / return to tiles | `Ctrl+Shift+Enter` |
 | Settings | `Ctrl+,` |
 | Rename a tab | `F2` or double-click |
+
+Choose **Full view** for one terminal or **Grid view** for multiple terminals. In Grid view, use **Choose tabs** to check the open terminals you want displayed, up to six. The grid adjusts automatically: up to three side by side, four in a 2×2 grid, five with three above and two below, and six in a 3×2 grid. Choosing a view never opens extra shells. Unchecked terminals keep running with their output preserved.
+
+Click a pane to focus it. Clicking an undisplayed sidebar tab adds it to the grid when there is room. Each pane has an expand button to switch to Full view; choosing Grid view restores the selection. Collapse the sidebar into a narrow icon rail with its top-left button or `Ctrl+Shift+B`; tab status, the shell chooser, sounds, and settings remain available.
 
 ---
 
@@ -284,6 +291,7 @@ flowchart LR
 
 ```sh
 node test/agent-setup.js             # Claude Code / Codex config editing (temporary folders only)
+node test/tiled-workspace.js          # Electron layouts 1-6, focus, resize, terminal input, sidebar rail
 node test/pty-markers.js             # PowerShell success/failure markers
 node test/bash-markers.js wsl        # WSL markers
 node test/bash-markers.js gitbash    # Git Bash markers

@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "project": {
+    "name": "belor",
+    "productType": "Windows terminal desktop application",
+    "stack": [
+      "Electron",
+      "vanilla JavaScript",
+      "CSS",
+      "xterm.js"
+    ]
+  },
+  "sources": {
+    "tokens": [
+      "src/renderer/style.css",
+      "src/renderer/themes.js"
+    ],
+    "components": [
+      "src/renderer/index.html",
+      "src/renderer/app.js"
+    ],
+    "assets": [
+      "assets"
+    ],
+    "instructions": []
+  },
+  "design": {
+    "colorMode": "system with theme override",
+    "colors": {
+      "foreground": "--text",
+      "muted": "--dim",
+      "accent": "--accent",
+      "border": "--line",
+      "panel": "--card",
+      "chrome": "--frame"
+    },
+    "typography": {
+      "ui": "Segoe UI Variable Text, Segoe UI, system-ui",
+      "terminal": "user-selected monospace"
+    },
+    "spacing": {},
+    "radius": {},
+    "shadows": {},
+    "motion": {},
+    "density": "compact"
+  },
+  "components": {
+    "installed": [],
+    "preferredPrimitives": [
+      "native select",
+      "existing icon buttons",
+      "CSS grid"
+    ],
+    "patterns": [
+      "theme-derived colors",
+      "collapsible sidebar icon rail",
+      "terminal pane headers"
+    ]
+  },
+  "constraints": {
+    "must": [
+      "Keep terminal sessions alive when changing layout",
+      "Refit every visible terminal on pane resize",
+      "Support keyboard focus and reduced motion"
+    ],
+    "avoid": [
+      "New UI dependencies",
+      "Replacing the existing theme system"
+    ]
+  },
+  "decisions": [
+    "Only Full view and Grid view. Choose tabs selects up to six existing terminals without opening shells.",
+    "Grid adjusts to the selected count: up to three side by side, four 2 by 2, five three above two, six 3 by 2.",
+    "Full view preserves the grid selection. Expanding a pane uses Full view.",
+    "Sidebar collapses to a 56px icon rail with shell chooser, status, sounds, and settings.",
+    "Full / Grid uses a compact rounded segmented button with icons, pressed state, and arrow-key navigation, matching the chat/work mode-switch pattern requested by the user.",
+    "Sidebar tabs support drag reorder and Ctrl+Shift+Up/Down. Grid pane headers can be dragged to rearrange the same sessions.",
+    "A separate pop-out window retains the same terminal process. Window close returns it to the main window; the explicit Close tab control ends the session."
+  ],
+  "evidence": [
+    "21st search attempted; service returned HTTP 401. Existing Belor primitives reused."
+  ],
+  "generatedAt": "2026-11-13T16:47:11.265Z"
+}

@@ -1,11 +1,11 @@
 const { app, BrowserWindow, ipcMain, dialog, Notification, Tray, Menu, nativeImage, shell: electronShell } = require('electron');
-const { execFile, spawn } = require('node:child_process');
-const crypto = require('node:crypto');
-const net = require('node:net');
+const { execFile } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
+
+if (process.argv.includes('--terminal-host')) { require('./terminal-host'); return; }
 
 app.setAppUserModelId('com.belor.app');
 if (process.env.ST_USERDATA) app.setPath('userData', process.env.ST_USERDATA); // isolated profile for tests
@@ -21,57 +21,19 @@ if (process.argv.includes('--admin-helper')) {
   return;
 }
 
-const pty = require('node-pty');
+const { TerminalClient } = require('./terminal-client');
 const { detectShells, ADMIN_KINDS, SHELL_DIR } = require('./shells');
-const { send, lineReader } = require('./jsonlines');
 const agentSetup = require('./agent-setup');
 const resumeTools = require('./resume-tools');
 const activeSessions = require('./active-sessions');
 const { setupBackground } = require('./background');
+const NOTIFY_SCRIPT = path.join(process.env.ST_BIN_DIR || path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Belor', 'bin'), 'st-notify.ps1');
+function installNotifyScript() { fs.mkdirSync(path.dirname(NOTIFY_SCRIPT), { recursive: true }); fs.copyFileSync(path.join(SHELL_DIR, 'st-notify.ps1'), NOTIFY_SCRIPT); }
 
 // ---- events from Claude Code / Codex running inside a tab ----------------------------------
 // Each tab's shell gets BELOR_PIPE / BELOR_TAB / BELOR_TOKEN. A hook in the tool runs st-notify.ps1,
 // which reports "done", "attention" or "error" to this pipe, and the app plays the matching sound.
 // The script lives at a fixed per-user path so the hook keeps working if the app is moved or updated.
-const BIN_DIR = process.env.ST_BIN_DIR || path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Belor', 'bin');
-const NOTIFY_SCRIPT = path.join(BIN_DIR, 'st-notify.ps1');
-const eventPipe = `\\\\.\\pipe\\belor-events-${crypto.randomBytes(16).toString('hex')}`;
-const eventToken = Buffer.from(crypto.randomBytes(32).toString('hex'));
-const agentEnv = (id) => ({ BELOR_PIPE: eventPipe, BELOR_TAB: String(id), BELOR_TOKEN: eventToken.toString() });
-const AGENT_EVENTS = new Set(['running', 'done', 'attention', 'error']);
-let eventBudget = 20, eventBudgetReset = 0;
-
-function installNotifyScript() {
-  fs.mkdirSync(BIN_DIR, { recursive: true });
-  fs.copyFileSync(path.join(SHELL_DIR, 'st-notify.ps1'), NOTIFY_SCRIPT);
-  // Hooks written when the app was called "Sound Terminal" still point at the old folder. Keep that copy current so they keep
-  // working until you press "Update" in Settings, which moves them to the new location.
-  const legacy = path.join(path.dirname(path.dirname(BIN_DIR)), 'SoundTerminal', 'bin', 'st-notify.ps1');
-  try { if (!process.env.ST_BIN_DIR && fs.existsSync(path.dirname(legacy))) fs.copyFileSync(path.join(SHELL_DIR, 'st-notify.ps1'), legacy); } catch { /* best effort */ }
-}
-
-function handleAgentEvent(msg) {
-  if (!msg || typeof msg !== 'object') return;
-  const sent = Buffer.from(String(msg.token || ''));
-  if (sent.length !== eventToken.length || !crypto.timingSafeEqual(sent, eventToken)) return;   // not from one of our tabs
-  if (!AGENT_EVENTS.has(msg.event) || !Number.isInteger(msg.tab) || !(ptys.has(msg.tab) || remote.has(msg.tab))) return;
-  const now = Date.now();
-  if (now > eventBudgetReset) { eventBudget = 20; eventBudgetReset = now + 1000; }
-  if (eventBudget-- <= 0) return;                                  // at most 20 events a second
-  const tool = /^[a-z0-9-]{1,20}$/.test(String(msg.tool)) ? msg.tool : 'agent';
-  if (win && !win.isDestroyed()) win.webContents.send('agent:event', { tab: msg.tab, event: msg.event, tool });
-}
-
-function startEventServer() {
-  const server = net.createServer((socket) => {
-    lineReader(socket, handleAgentEvent, 4096);
-    socket.on('error', () => { /* a client that vanished */ });
-    setTimeout(() => socket.destroy(), 3000);
-  });
-  server.on('error', (e) => console.error('[events]', e.message));
-  server.listen(eventPipe);
-}
-
 const ICON_ICO = path.join(__dirname, '..', 'build', 'icon.ico').replace('app.asar', 'app.asar.unpacked');
 const ICON = fs.existsSync(ICON_ICO) ? ICON_ICO : path.join(__dirname, '..', 'build', 'icon.png');
 const THEMES = {
@@ -80,14 +42,22 @@ const THEMES = {
 };
 
 const shells = detectShells();
-const ptys = new Map();            // id -> local pty
-const remote = new Map();          // id -> webContents (admin ptys that live in the elevated helper)
-let nextId = 1;
+let terminals;
 let win;
 let background;
 let isAdmin = false;
-let closeConfirmed = !!process.env.ST_SELFTEST;   // tests quit without the confirm dialog
-const prefs = { confirmClose: true };      // window preferences the page sends us (see app:prefs)
+const popouts = new Map();
+let quitting = false;
+app.on('before-quit', () => { quitting = true; });
+const connectionFor = sender => [...popouts.values()].find(p => p.window.webContents === sender)?.client || terminals;
+const popoutFor = sender => [...popouts.entries()].find(([, p]) => p.window.webContents === sender)?.[0];
+function forwardTerminalMessage(window, msg) {
+  if (!window || window.isDestroyed()) return;
+  if (msg.t === 'data') window.webContents.send('pty:data', msg.id, msg.data, !!msg.replay);
+  else if (msg.t === 'exit') window.webContents.send('pty:exit', msg.id, msg.code);
+  else if (msg.t === 'agent') window.webContents.send('agent:event', msg.event);
+  else if (msg.t === 'error' || msg.t === 'disconnected') window.webContents.send('pty:error', msg.message || 'Terminal host disconnected. Reopen Belor to reconnect to saved history.');
+}
 
 // One-time: bring the saved settings across from when the app was called "Sound Terminal" (before the lock below creates the new folder).
 if (!process.env.ST_USERDATA) {
@@ -115,98 +85,6 @@ function checkAdmin() {
   return new Promise((resolve) => {
     execFile('fltmc', [], { windowsHide: true }, (err) => resolve(!err));
   });
-}
-
-// ---- elevated admin helper ----------------------------------------------------------------
-// The app is the pipe SERVER and the elevated helper is the CLIENT. That direction matters: if
-// the elevated side listened, any program running as you could connect and get an admin shell.
-let helper = null;                 // { socket, pending: Map<id, {resolve, reject}> }
-let helperStarting = null;
-
-function failPending(h, err) {
-  for (const p of h.pending.values()) p.reject(err);
-  h.pending.clear();
-}
-
-function helperClosed(h) {
-  if (helper === h) helper = null;
-  failPending(h, new Error('The administrator helper stopped.'));
-  for (const [id, sender] of remote) {
-    if (!sender.isDestroyed()) sender.send('pty:exit', id, -1);
-  }
-  remote.clear();
-}
-
-function onHelperMessage(h, msg) {
-  switch (msg.t) {
-    case 'spawned': h.pending.get(msg.id)?.resolve(); h.pending.delete(msg.id); break;
-    case 'error': h.pending.get(msg.id)?.reject(new Error(msg.message || 'Could not start the admin shell.')); h.pending.delete(msg.id); break;
-    case 'data': { const s = remote.get(msg.id); if (s && !s.isDestroyed()) s.send('pty:data', msg.id, msg.data); break; }
-    case 'exit': { const s = remote.get(msg.id); remote.delete(msg.id); if (s && !s.isDestroyed()) s.send('pty:exit', msg.id, msg.code); break; }
-    default: break;
-  }
-}
-
-function launchElevated(pipeName, token) {
-  const args = [...(app.isPackaged ? [] : [app.getAppPath()]), '--admin-helper', '--pipe', pipeName, '--token', token];
-  if (process.env.ST_FAKE_DECLINE) return Promise.resolve(1);   // test hook: behave as if UAC was declined
-  if (process.env.ST_FAKE_ELEVATE) {            // test hook: run the helper without the UAC prompt
-    return new Promise((resolve) => { spawn(process.execPath, args, { stdio: 'ignore', windowsHide: true }).unref(); resolve(0); });
-  }
-  const q = (s) => `'${String(s).replace(/'/g, "''")}'`;
-  const cmd = `Start-Process -FilePath ${q(process.execPath)} -ArgumentList ${args.map(q).join(',')} -Verb RunAs`;
-  return new Promise((resolve) => {
-    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { windowsHide: true });
-    child.on('exit', (code) => resolve(code));
-    child.on('error', () => resolve(1));
-  });
-}
-
-function startHelper() {
-  return new Promise((resolve, reject) => {
-    const pipeName = `\\\\.\\pipe\\belor-${crypto.randomBytes(16).toString('hex')}`;
-    const token = Buffer.from(crypto.randomBytes(32).toString('hex'));
-    let settled = false;
-    const done = (err, h) => {
-      if (settled) return; settled = true;
-      clearTimeout(timer);
-      server.close();                              // no further connections are accepted
-      if (err) reject(err); else resolve(h);
-    };
-
-    const server = net.createServer((socket) => {
-      let authed = false;
-      const h = { socket, pending: new Map() };
-      lineReader(socket, (msg) => {
-        if (!authed) {
-          const sent = Buffer.from(String(msg.token || ''));
-          const ok = msg.t === 'hello' && sent.length === token.length && crypto.timingSafeEqual(sent, token);
-          if (!ok) { socket.destroy(); return; }           // wrong token: not our helper
-          if (!msg.elevated && !process.env.ST_FAKE_ELEVATE) { socket.destroy(); done(new Error('The helper did not get administrator rights.')); return; }
-          authed = true;
-          helper = h;
-          done(null, h);
-          return;
-        }
-        onHelperMessage(h, msg);
-      });
-      socket.on('close', () => { if (authed) helperClosed(h); });
-      socket.on('error', () => { /* handled by close */ });
-    });
-    server.on('error', (e) => done(e));
-    const timer = setTimeout(() => done(new Error('Timed out waiting for administrator approval.')), 60000);
-
-    server.listen(pipeName, async () => {
-      const code = await launchElevated(pipeName, token.toString());
-      if (code !== 0) done(new Error('Administrator access was not granted.'));   // UAC declined
-    });
-  });
-}
-
-function ensureHelper() {
-  if (helper && !helper.socket.destroyed) return Promise.resolve(helper);
-  if (!helperStarting) helperStarting = startHelper().finally(() => { helperStarting = null; });
-  return helperStarting;
 }
 
 // ---- window state -------------------------------------------------------------------------
@@ -250,19 +128,8 @@ function createWindow() {
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
   win.on('focus', () => win.flashFrame(false));
-  const confirmQuit = () => {
-    const open = ptys.size + remote.size;
-    if (prefs.confirmClose && open > 0 && !closeConfirmed) {
-      const choice = dialog.showMessageBoxSync(win, {
-        type: 'question', buttons: ['Quit', 'Cancel'], defaultId: 1, cancelId: 1, noLink: true,
-        title: 'Quit Belor', message: 'Quit Belor and stop its terminal sessions?',
-        detail: `${open} terminal tab${open === 1 ? ' is' : 's are'} still open. Programs running in ${open === 1 ? 'it' : 'them'} will be stopped.`,
-      });
-      if (choice !== 0) return false;
-      closeConfirmed = true;
-    }
-    return true;
-  };
+  const confirmQuit = () => true; // Terminal host survives desktop Quit.
+
   background = setupBackground({ app, win, Tray, Menu, icon: appIcon, confirmQuit, saveBounds });
 
   win.webContents.on('render-process-gone', (_e, d) => console.error('[renderer gone]', d.reason, d.exitCode));
@@ -331,8 +198,15 @@ const runningWindows = new Map();
 const windowConversations = new Map();
 function discoverRunningTerminals() {
   if (!activeSessionScan) {
-    activeSessionScan = activeSessions.readSnapshot().then(snapshot => {
-        const excluded = [process.pid, helper?.pid, ...[...ptys.values()].map(p => p.pid)];
+    activeSessionScan = activeSessions.readSnapshot().then(async snapshot => {
+        const hosted = await terminals.request('list');
+        // Link manually started/picker-selected conversations to their exact PTY.
+        const ownedSessions = activeSessions.select(snapshot, [], undefined, hosted.map(tab => tab.pid).filter(Boolean));
+        for (const tab of hosted) {
+          const matches = ownedSessions.filter(session => session.ownerPid === tab.pid);
+          if (matches.length === 1) terminals.send('conversation', { id: tab.id, resumeTool: matches[0].toolId, resumeSession: matches[0].sessionId });
+        }
+        const excluded = [process.pid, ...hosted.map(p => p.pid).filter(Boolean)];
         const sessions = activeSessions.select(snapshot, excluded);
         const installed = new Set(resumeTools.detect().map(tool => tool.id));
         automaticSessions.clear();
@@ -358,10 +232,11 @@ ipcMain.handle('terminals:resume-window', async (_event, key) => {
   windowConversations.set(session.key, session);
   return session;
 });
-ipcMain.handle('app:info', () => {
+ipcMain.handle('app:info', (event) => {
   for (const k of Object.keys(ASSET_KINDS)) fs.mkdirSync(assetDir(k), { recursive: true });
   return {
     isAdmin,
+    popoutId: popoutFor(event.sender) || null,
     version: app.getVersion(),
     shells: shells.map(({ id, label, kind }) => ({ id, label, kind, adminOk: ADMIN_KINDS.has(kind) })),
     resumeTools: resumeTools.detect().map(({ id, label }) => ({ id, label })),
@@ -397,37 +272,49 @@ ipcMain.handle('pty:create', async (event, { shellId, cols, rows, cwd, admin, re
     if (!session) throw new Error('That running session is no longer available.');
     resumeTool = session.toolId; resumeSession = session.sessionId; cwd = session.cwd;
   }
-  const resume = resumeTool ? resumeTools.detect().find(tool => tool.id === resumeTool) : null;
-  if (resumeTool && !resume) throw new Error('That application is no longer installed. Restart Belor after installing it.');
-  if (resume && admin) throw new Error('Resume the application in a regular terminal.');
-  const sh = resume ? shells.find(s => s.id === 'powershell') : shells.find((s) => s.id === shellId) || shells[0];
-  const id = nextId++;
-  const c = Math.max(2, cols | 0), r = Math.max(1, rows | 0);
-  const startDir = typeof cwd === 'string' && cwd && fs.existsSync(cwd) ? cwd : app.getPath('home');
-
-  if (admin && !isAdmin) {
-    if (!ADMIN_KINDS.has(sh.kind)) throw new Error(`${sh.label} has no administrator mode.`);
-    const h = await ensureHelper();                       // one UAC prompt; later admin tabs reuse the helper
-    await new Promise((resolve, reject) => {
-      h.pending.set(id, { resolve, reject });
-      remote.set(id, event.sender);
-      send(h.socket, { t: 'spawn', id, shellId: sh.id, cols: c, rows: r, cwd: startDir, env: agentEnv(id) });
-    }).catch((e) => { remote.delete(id); throw e; });
-    return id;
-  }
-
-  const p = pty.spawn(sh.file, resume ? resumeTools.launch(resume, resumeSession) : sh.args, {
-    name: 'xterm-256color', cols: c, rows: r, cwd: startDir,
-    env: { ...process.env, ...(sh.env || {}), TERM_PROGRAM: 'belor', ...agentEnv(id) },
-    useConpty: true,
+  return terminals.request('create', { shellId, cols, rows, cwd, admin, resumeTool, resumeSession, autoSessionKey });
+});
+ipcMain.handle('pty:list', async (event) => {
+  const id = popoutFor(event.sender);
+  return (await terminals.request('list')).filter(tab => id ? tab.id === id : !popouts.has(tab.id));
+});
+ipcMain.handle('pty:dismissed', () => terminals.request('dismissed'));
+ipcMain.handle('pty:attach', (event, id) => connectionFor(event.sender).request('attach', { id }));
+ipcMain.on('pty:metadata', (event, tabs) => terminals.send('metadata', { tabs, preserveOrder: !!popoutFor(event.sender) }));
+ipcMain.handle('pty:popout', async (_event, id) => {
+  if (popouts.has(id)) { popouts.get(id).window.show(); popouts.get(id).window.focus(); return true; }
+  if (!(await terminals.request('list')).some(tab => tab.id === id)) throw Error('That terminal has already closed.');
+  const client = new TerminalClient(app.getPath('userData'), process.execPath, app.getAppPath());
+  await client.connect();
+  const window = new BrowserWindow({ width: 900, height: 620, minWidth: 480, minHeight: 320,
+    title: 'Belor terminal', icon: ICON, backgroundColor: THEMES.dark.color,
+    titleBarStyle: 'hidden', titleBarOverlay: { ...THEMES.dark, height: 40 },
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
   });
-  ptys.set(id, p);
-  p.onData((data) => { if (!event.sender.isDestroyed()) event.sender.send('pty:data', id, data); });
-  p.onExit(({ exitCode }) => {
-    ptys.delete(id);
-    if (!event.sender.isDestroyed()) event.sender.send('pty:exit', id, exitCode);
+  popouts.set(id, { window, client });
+  client.on('message', msg => forwardTerminalMessage(window, msg));
+  window.setMenuBarVisibility(false);
+  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  window.webContents.on('will-navigate', event => event.preventDefault());
+  window.on('closed', async () => {
+    popouts.delete(id); client.disconnect();
+    if (quitting || !win || win.isDestroyed()) return;
+    try {
+      const record = (await terminals.request('list')).find(tab => tab.id === id);
+      if (record) {
+        win.webContents.send('pty:returned', record);
+        background.show(false);
+      }
+    } catch (error) { console.error('[return terminal]', error.message); }
   });
-  return id;
+  try { await window.loadFile(path.join(__dirname, 'renderer', 'index.html')); }
+  catch (error) { window.close(); throw error; }
+  terminals.send('detach', { id });
+  return true;
+});
+ipcMain.on('pty:return', (event) => {
+  const id = popoutFor(event.sender);
+  if (id) popouts.get(id).window.close();
 });
 
 // Links in the terminal open in the default browser. Only web and mail links are allowed.
@@ -441,10 +328,10 @@ ipcMain.handle('shell:open', (_e, url) => {
 
 ipcMain.on('app:prefs', (_e, p) => {
   if (!p || typeof p !== 'object') return;
-  if (typeof p.confirmClose === 'boolean') prefs.confirmClose = p.confirmClose;
-  if (!win || win.isDestroyed()) return;
-  if (typeof p.alwaysOnTop === 'boolean') win.setAlwaysOnTop(p.alwaysOnTop);
-  if (typeof p.opacity === 'number') win.setOpacity(Math.min(1, Math.max(0.3, p.opacity)));
+  const target = BrowserWindow.fromWebContents(_e.sender);
+  if (!target || target.isDestroyed()) return;
+  if (typeof p.alwaysOnTop === 'boolean') target.setAlwaysOnTop(p.alwaysOnTop);
+  if (typeof p.opacity === 'number') target.setOpacity(Math.min(1, Math.max(0.3, p.opacity)));
 });
 ipcMain.on('win:fullscreen', () => { if (win && !win.isDestroyed()) win.setFullScreen(!win.isFullScreen()); });
 
@@ -485,31 +372,20 @@ ipcMain.handle('agent:setup', (_e, { tool, enable }) => {
   return agentSetup.setup(tool, !!enable, NOTIFY_SCRIPT);
 });
 
-ipcMain.on('pty:write', (_e, id, data) => {
-  if (ptys.has(id)) ptys.get(id).write(String(data));
-  else if (remote.has(id) && helper) send(helper.socket, { t: 'write', id, data: String(data) });
-});
-ipcMain.on('pty:resize', (_e, id, cols, rows) => {
-  if (ptys.has(id)) { try { ptys.get(id).resize(Math.max(2, cols | 0), Math.max(1, rows | 0)); } catch { /* pty already closed */ } }
-  else if (remote.has(id) && helper) send(helper.socket, { t: 'resize', id, cols, rows });
-});
-ipcMain.on('pty:kill', (_e, id) => {
-  if (ptys.has(id)) { try { ptys.get(id).kill(); } catch { /* already gone */ } ptys.delete(id); }
-  else if (remote.has(id)) { if (helper) send(helper.socket, { t: 'kill', id }); remote.delete(id); }
-});
+ipcMain.on('pty:write', (_e, id, data) => terminals.send('write', { id, data }));
+ipcMain.on('pty:resize', (_e, id, cols, rows) => terminals.send('resize', { id, cols, rows }));
+ipcMain.on('pty:kill', (_e, id) => terminals.send('close', { id }));
 
 ipcMain.on('win:theme', (_e, t) => {
   const hex = /^#[0-9a-f]{6}$/i;
-  if (!win || win.isDestroyed() || !t || !hex.test(t.color) || !hex.test(t.symbolColor)) return;
-  win.setBackgroundColor(t.color);
-  try { win.setTitleBarOverlay({ color: t.color, symbolColor: t.symbolColor, height: 40 }); } catch { /* not supported on this platform */ }
+  const target = BrowserWindow.fromWebContents(_e.sender);
+  if (!target || target.isDestroyed() || !t || !hex.test(t.color) || !hex.test(t.symbolColor)) return;
+  target.setBackgroundColor(t.color);
+  try { target.setTitleBarOverlay({ color: t.color, symbolColor: t.symbolColor, height: 40 }); } catch { /* not supported on this platform */ }
 });
 
-app.on('window-all-closed', () => {
-  for (const p of ptys.values()) { try { p.kill(); } catch { /* ignore */ } }
-  if (helper) helper.socket.destroy();       // the helper exits when this connection closes
-  app.quit();
-});
+app.on('window-all-closed', () => app.quit());
+app.on('will-quit', () => { terminals?.disconnect(); for (const p of popouts.values()) p.client.disconnect(); });
 
 // The elevated helper can't always delete its own profile folder while it exits (Chromium still has
 // files open), so remove folders left by helpers that are no longer running.
@@ -527,8 +403,9 @@ function cleanStaleHelperDirs() {
 
 app.whenReady().then(async () => {
   cleanStaleHelperDirs();
-  startEventServer();
-  try { installNotifyScript(); } catch (e) { console.error('[notify script]', e.message); }
+  terminals = new TerminalClient(app.getPath('userData'), process.execPath, app.getAppPath());
+  terminals.on('message', msg => forwardTerminalMessage(win, msg));
+  await terminals.connect();
   isAdmin = await checkAdmin();
   createWindow();
-});
+}).catch(error => { dialog.showErrorBox('Belor could not reconnect', error.message); app.quit(); });

@@ -43,6 +43,15 @@
         <span id="crumb-admin" class="pill-admin" hidden>Administrator</span>
         <span id="crumb-sub"></span>
       </div>
+      <div class="layout-controls nodrag">
+        <div id="layout-switch" class="view-switch" role="group" aria-label="Terminal view">
+          <button type="button" data-view="full" aria-pressed="true" title="Full view"><span data-icon="expand"></span>Full</button>
+          <button type="button" data-view="grid" aria-pressed="false" title="Grid view"><span data-icon="grid"></span>Grid</button>
+        </div>
+        <button id="choose-tabs" class="btn small" aria-haspopup="dialog" aria-expanded="false" hidden>Choose tabs</button>
+        <div id="grid-tabs" class="popup grid-tabs" role="dialog" aria-label="Choose terminals to display" hidden></div>
+      </div>
+      <button id="popout-tab" class="icon-btn nodrag" title="Open terminal in a separate window" aria-label="Open terminal in a separate window"><span data-icon="popout"></span></button>
     </div>
     <div id="terms"></div>
     <div id="findbar" class="findbar" role="search" hidden>
@@ -271,12 +280,9 @@
       <div class="row"><label for="set-winop">Window opacity</label>
         <div class="range"><input id="set-winop" type="range" min="40" max="100" step="1"><output id="set-winop-out"></output></div></div>
       <p class="hint">Closing the window keeps Belor and its tabs running in the system tray. Use the tray menu to show or quit Belor.</p>
-      <div class="row"><label for="set-confirmclose">Ask before quitting when tabs are open</label>
-        <label class="switch"><input id="set-confirmclose" type="checkbox"><span></span></label></div>
 
       <h3>Starting up</h3>
-      <div class="row"><label for="set-restore">Reopen the tabs I had last time<small>Same shells and folders. Administrator tabs are not reopened.</small></label>
-        <label class="switch"><input id="set-restore" type="checkbox"><span></span></label></div>
+      <div class="row"><label>Keep terminal sessions<small>Tabs, running programs, and history survive closing or quitting Belor. Close a tab to end that session. After a computer restart, saved history remains available.</small></label><span class="pill">Always on</span></div>
 
       <h3>Shortcuts</h3>
       <dl class="keys">
@@ -287,6 +293,7 @@
         <dt>Clear the tab</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>K</kbd></dd>
         <dt>Zoom in / out / reset</dt><dd><kbd>Ctrl</kbd><kbd>+</kbd> <kbd>Ctrl</kbd><kbd>-</kbd> <kbd>Ctrl</kbd><kbd>0</kbd></dd>
         <dt>Full screen</dt><dd><kbd>F11</kbd></dd>
+        <dt>Expand pane / back to tiles</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Enter</kbd></dd>
         <dt>Next / previous tab</dt><dd><kbd>Ctrl</kbd><kbd>Tab</kbd></dd>
         <dt>Collapse sidebar</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>B</kbd></dd>
         <dt>Copy / paste</dt><dd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>C</kbd> <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>V</kbd></dd>

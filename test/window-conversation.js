@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { resolve } = require('../src/window-conversation');
+const { resolve, outputTitle } = require('../src/window-conversation');
 const { metadata } = require('../src/active-sessions');
 const savedHome = process.env.CODEX_HOME;
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'belor-conversation-'));
@@ -17,6 +17,9 @@ try {
  fs.writeFileSync(file, JSON.stringify({ type: 'session_meta', payload: { id, cwd: root, source: 'vscode' } }) + '\n');
  fs.writeFileSync(index, JSON.stringify({ id, thread_name: 'My conversation' }) + '\n');
  assert.equal(resolve('My conversation | user').sessionId, id);
+ assert.equal(resolve('\u280f My conversation | user').sessionId, id);
+ assert.equal(outputTitle('\x1b]0;Old title\x07\x1b]2;\u280b My conversation | user\x1b\\'), 'My conversation | user');
+ assert.equal(outputTitle('My conversation | user'), null, 'Ordinary printed text is not evidence of terminal title');
  assert.equal(resolve('My conversation').cwd, root);
  assert.equal(metadata(file, 'codex'), null); // Do not broaden automatic process detection.
  assert.equal(resolve('My conversation extra'), null);

@@ -7,6 +7,8 @@ const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 // A window title is not a process-transfer mechanism. Resolve only an exact,
 // unique saved conversation name; never choose a session by modification time.
 function resolve(title) {
+  // Codex prefixes its terminal title with an animated braille spinner.
+  if (typeof title === 'string') title = title.replace(/^[\u2800-\u28ff]\s+/, '');
   const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
   const index = path.join(home, 'session_index.jsonl');
   try {
@@ -30,4 +32,9 @@ function resolve(title) {
     return { key: `codex:${sessionId}`, toolId: 'codex', sessionId, cwd: meta.cwd };
   } catch { return null; }
 }
-module.exports = { resolve };
+function outputTitle(output) {
+  let title = null;
+  for (const match of output.matchAll(/\x1b\](?:0|2);([^\x07\x1b]{1,512})(?:\x07|\x1b\\)/g)) title = match[1].replace(/^[\u2800-\u28ff]\s+/, '');
+  return title;
+}
+module.exports = { resolve, outputTitle };

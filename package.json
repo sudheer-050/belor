@@ -1,7 +1,7 @@
 {
   "name": "belor",
   "productName": "Belor",
-  "version": "0.7.4",
+  "version": "0.7.9",
   "description": "A Windows terminal for your shells and AI coding assistants: color-coded tabs, Claude Code and Codex awareness, popups and sounds, admin tabs in the same window",
   "author": "Sudheer Kumar Gandiboyana",
   "license": "MIT",
@@ -27,7 +27,7 @@
   "build": {
     "appId": "com.belor.app",
     "productName": "Belor",
-    "copyright": "Copyright © 2026 Sudheer Kumar Gandiboyana",
+    "copyright": "Copyright Â© 2026 Sudheer Kumar Gandiboyana",
     "npmRebuild": false,
     "directories": {
       "output": "dist",

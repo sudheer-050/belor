@@ -33,5 +33,13 @@ jobs:
         run: node test/terminal-window-sidebar.js
       - name: Close-to-tray and explicit quit checks
         run: node test/background.js
+      - name: Saved terminal and conversation recovery checks
+        run: node test/terminal-persistence.js
+      - name: Upgrade startup defaults
+        run: node test/startup-restore.js
+      - name: Popout session ownership checks
+        run: node test/popout-window.js
+      - name: Native conversation notification checks
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/notify-session.ps1
       - name: Native process and saved-session ownership checks
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/active-sessions-native.ps1

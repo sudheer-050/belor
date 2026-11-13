@@ -24,7 +24,20 @@ function Send-BelorEvent {
         $client.Connect(1500)
         $writer = New-Object System.IO.StreamWriter($client)
         $writer.AutoFlush = $true
-        $writer.WriteLine((@{ token = $token; tab = [int]$tab; event = $Event; tool = $Tool } | ConvertTo-Json -Compress))
+        $message = @{ token = $token; tab = [int]$tab; event = $Event; tool = $Tool }
+        # Capture the exact conversation from the tool's own hook, even when
+        # Windows prevents inspecting process handles for automatic discovery.
+        $payload = $null
+        if ($Tool -eq 'codex' -and @($Rest).Count -gt 0) {
+            try { $payload = ([string]@($Rest)[-1] | ConvertFrom-Json) } catch { }
+        } elseif ($Tool -eq 'claude' -and [Console]::IsInputRedirected) {
+            try { $payload = ([Console]::In.ReadToEnd() | ConvertFrom-Json) } catch { }
+        }
+        if ($payload) {
+            $sessionId = if ($Tool -eq 'codex') { $payload.'thread-id' } else { $payload.session_id }
+            if ($sessionId -match '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$') { $message.sessionId = $sessionId }
+        }
+        $writer.WriteLine(($message | ConvertTo-Json -Compress))
         $writer.Dispose()
     } catch { }
 }

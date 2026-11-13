@@ -59,7 +59,7 @@ function metadata(file, tool, allowIde = false) {
   return null;
 }
 
-function select(snapshot, excluded = [], readMetadata = metadata) {
+function select(snapshot, excluded = [], readMetadata = metadata, ownedRoots = null) {
   const processes = snapshot.processes || [], byId = new Map(processes.map(p => [p.pid, p])), ignore = new Set(excluded);
   function family(p) {
     const result = [p], seen = new Set([p.pid]);
@@ -76,8 +76,12 @@ function select(snapshot, excluded = [], readMetadata = metadata) {
     const toolId = toolFor(process);
     if (!toolId) continue;
     const chain = family(process);
-    if (chain.some(p => ignore.has(p.pid) || /^belor\.exe$/i.test(p.name))) continue;
-    if (!chain.some(p => windows.includes(p)) && !windows.some(w => /^(conhost|OpenConsole)\.exe$/i.test(w.name) && chain.some(p => p.pid === w.parentPid))) continue;
+    const owner = ownedRoots && chain.find(p => ownedRoots.includes(p.pid));
+    if (ownedRoots) { if (!owner) continue; }
+    else {
+      if (chain.some(p => ignore.has(p.pid) || /^belor\.exe$/i.test(p.name))) continue;
+      if (!chain.some(p => windows.includes(p)) && !windows.some(w => /^(conhost|OpenConsole)\.exe$/i.test(w.name) && chain.some(p => p.pid === w.parentPid))) continue;
+    }
     const owned = (snapshot.files || []).filter(file => file.pid === process.pid).map(file => readMetadata(file.file, toolId))
       .filter(meta => meta && UUID.test(meta.sessionId) && typeof meta.cwd === 'string' && path.isAbsolute(meta.cwd)
         && (!meta.registeredAt || Math.abs(new Date(meta.registeredAt).getTime() - new Date(process.started).getTime()) < 30000));
@@ -85,7 +89,7 @@ function select(snapshot, excluded = [], readMetadata = metadata) {
     // An open rollout owned by this exact interactive process is evidence. File dates are not.
     if (unique.size !== 1) continue;
     const meta = [...unique.values()][0], key = `${toolId}:${meta.sessionId}`;
-    if (!result.has(key)) result.set(key, { key, toolId, sessionId: meta.sessionId, cwd: meta.cwd, pid: process.pid, started: process.started });
+    if (!result.has(key)) result.set(key, { key, toolId, sessionId: meta.sessionId, cwd: meta.cwd, pid: process.pid, started: process.started, ...(owner ? { ownerPid: owner.pid } : {}) });
   }
   return [...result.values()];
 }

@@ -2,6 +2,7 @@
   const info = await window.term.info();
   const $ = (id) => document.getElementById(id);
   const root = document.documentElement;
+  if (info.popoutId) document.body.classList.add('popout');
   const tabsEl = $('tabs'), termsEl = $('terms'), newMenu = $('new-menu'), ctx = $('ctx'), drawer = $('drawer');
   const { normHex, mix, rgba, isDark, fontInstalled } = window.color;
   const clone = (o) => JSON.parse(JSON.stringify(o));
@@ -27,6 +28,7 @@
       cursor: { style: 'block', blink: true },
       defaultShell: info.shells[0].id,
       collapsed: false,
+      layout: 'full',
       bellSound: false,        // ping when a program rings the terminal bell (Codex questions)
       agentIdleDone: true,     // mark a Claude Code / Codex run done when it goes quiet, if no hook reported it
       notify: { enabled: true, onDone: true, onFail: true, onAsk: true, minSeconds: 5 },   // popups while the window is not in front
@@ -37,7 +39,7 @@
       },
       tabColors: { running: '', ok: '', fail: '', empty: '', ask: '' },   // '' = follow the theme
       win: { alwaysOnTop: false, opacity: 100, confirmClose: true },
-      startup: { restore: false, dirMode: 'home', dir: '', session: [], active: 0 },
+      startup: { restore: true, persistenceVersion: 1, dirMode: 'home', dir: '', session: [], active: 0 },
     };
   }
   const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -67,7 +69,8 @@
     if (isObj(saved.background) && isObj(saved.background.gradient) && Array.isArray(saved.background.gradient.stops) && saved.background.gradient.stops.length >= 2) d.background.gradient.stops = saved.background.gradient.stops.map((c) => normHex(c) || '#000000').slice(0, 6);
     if (isObj(saved.font) && Array.isArray(saved.font.custom)) d.font.custom = saved.font.custom.filter((f) => f && typeof f.name === 'string' && typeof f.file === 'string');
     if (isObj(saved.startup) && Array.isArray(saved.startup.session)) {
-      d.startup.session = saved.startup.session.filter((t) => t && typeof t.shellId === 'string' && typeof t.cwd === 'string').slice(0, 20);
+      d.startup.session = saved.startup.session.filter((t) => t && typeof t.shellId === 'string' && typeof t.cwd === 'string').slice(0, 20)
+        .map((t) => ({ ...t, userTitle: typeof t.userTitle === 'string' ? t.userTitle.slice(0, 80) : '' }));
     }
     const s = clone(saved); delete s.savedThemes; delete s.recentImages;
     if (isObj(s.startup)) delete s.startup.session;
@@ -75,12 +78,17 @@
     if (isObj(s.background) && isObj(s.background.gradient)) delete s.background.gradient.stops;
     if (isObj(s.font)) delete s.font.custom;
     merge(d, s);
+    // Older releases defaulted restore off, discarding the workspace on update.
+    if (!saved.startup?.persistenceVersion) d.startup.restore = true;
+    if (typeof saved.layout === 'number') d.layout = saved.layout > 1 ? 'grid' : 'full';
+    if (!['full', 'grid'].includes(d.layout)) d.layout = 'full';
     for (const k of ['bg', 'fg', 'cursor', 'selection', 'accent']) d.theme[k] = normHex(d.theme[k]) || defaults().theme[k];
     return d;
   }
   const settings = loadSettings();
+  if (info.popoutId) settings.layout = 'full';
   if (!info.shells.some((s) => s.id === settings.defaultShell)) settings.defaultShell = info.shells[0].id;
-  const saveSettings = () => { try { localStorage.setItem('st-settings', JSON.stringify(settings)); } catch { /* ignore */ } };
+  const saveSettings = () => { if (info.popoutId) return; try { localStorage.setItem('st-settings', JSON.stringify(settings)); } catch { /* ignore */ } };
 
   // =================================================================== appearance engine
   const mq = window.matchMedia('(prefers-color-scheme: dark)');
@@ -163,7 +171,7 @@
   mq.addEventListener('change', () => { if (settings.followSystem) { applyAppearance(); syncThemeUI(); } });
 
   let fitTimer = null;
-  function fitSoon() { clearTimeout(fitTimer); fitTimer = setTimeout(() => { const t = tabs.get(activeId); if (t) fitTab(t); }, 60); }
+  function fitSoon() { clearTimeout(fitTimer); fitTimer = setTimeout(() => { for (const t of tabs.values()) fitTab(t); }, 60); }
 
   // user-added font files
   const loadedFonts = new Set();
@@ -181,6 +189,9 @@
   // =================================================================== tabs
   const tabs = new Map();      // pty id -> tab
   let activeId = null;
+  let visibleIds = [];
+  const layoutSwitch = $('layout-switch');
+  const gridTabs = $('grid-tabs'), chooseTabs = $('choose-tabs');
   let counter = 0;
   const KIND_LABEL = { powershell: 'PS', cmd: 'CMD', wsl: 'WSL', gitbash: 'GIT' };
 
@@ -215,6 +226,9 @@
 
   function refreshTab(tab) {
     tab.titleEl.textContent = titleOf(tab);
+    tab.el.querySelector('.pane-title').textContent = `${tab.admin ? 'Administrator · ' : ''}${titleOf(tab)}`;
+    tab.el.setAttribute('role', 'group');
+    tab.el.setAttribute('aria-label', `${titleOf(tab)}${tab.admin ? ' (Administrator)' : ''}`);
     const where = tab.cwd && !isRemoteish(tab) ? tab.cwd : tab.shell.label;
     tab.subEl.textContent = tab.admin ? `Administrator · ${where}` : where;
     tab.tabEl.title = `${titleOf(tab)}${tab.admin ? ' (Administrator)' : ''}\n${tab.cwd || tab.shell.label}`;
@@ -242,6 +256,7 @@
     // running = spinner, completed = tick, failed = cross, waiting = question mark, empty (including a new tab) = nothing
     tab.statusEl.innerHTML = { empty: '', running: ICONS.spinner, ok: ICONS.check, fail: ICONS.cross, ask: ICONS.ask }[state];
     tab.tabEl.setAttribute('aria-description', STATE_LABEL[state]);
+    persistSession();
   }
   // The user pressed Enter on something: it is running until the shell (or the tool) says it finished.
   // A 350 ms delay keeps quick commands from flashing "running".
@@ -442,9 +457,13 @@
     clearTimeout(sessionTimer);
     const write = () => {
       const list = orderedIds().map((id) => tabs.get(id)).filter((t) => t && !t.admin && !t.autoSessionKey);
-      settings.startup.session = list.map((t) => ({ shellId: t.shell.id, cwd: isRemoteish(t) ? '' : t.cwd || '' }));
+      settings.startup.session = list.map((t) => ({ shellId: t.shell.id, cwd: isRemoteish(t) ? '' : t.cwd || '', userTitle: t.userTitle || '' }));
       settings.startup.active = Math.max(0, list.findIndex((t) => t.id === activeId));
       saveSettings();
+      window.term.remember?.(orderedIds().map((id, order) => {
+        const t = tabs.get(id);
+        return { id, order, gridOrder: visibleIds.indexOf(id), active: id === activeId, cwd: t.cwd || '', userTitle: t.userTitle || '', agent: t.agent || '', state: t.state };
+      }));
     };
     if (now) write(); else sessionTimer = setTimeout(write, 400);
   }
@@ -458,6 +477,7 @@
     const cwd = opts.cwd === undefined ? startDir() : opts.cwd;
     const el = document.createElement('div');
     el.className = 'term';
+    el.innerHTML = '<div class="pane-header"><span class="pane-title"></span><button class="pane-zoom icon-btn" title="Expand pane (Ctrl+Shift+Enter)" aria-label="Expand pane">' + ICONS.expand + '</button><button class="pane-close icon-btn" title="Close tab" aria-label="Close tab">' + ICONS.close + '</button></div><div class="terminal-body"></div>';
     termsEl.appendChild(el);
 
     // Links (plain URLs and OSC 8 hyperlinks) open in the default browser, by default only with Ctrl held.
@@ -470,12 +490,12 @@
     term.loadAddon(new WebLinksAddon.WebLinksAddon(openLink));
     term.loadAddon(new Unicode11Addon.Unicode11Addon());
     term.unicode.activeVersion = settings.term.unicode;
-    term.open(el);
+    term.open(el.querySelector('.terminal-body'));
     fit.fit();
 
     let id;
     try {
-      id = await window.term.create({ shellId: shell.id, cols: term.cols, rows: term.rows, cwd, admin: !!opts.admin, resumeTool: opts.resumeTool, autoSessionKey: opts.autoSessionKey });
+      id = opts.id ?? await window.term.create({ shellId: shell.id, cols: term.cols, rows: term.rows, cwd, admin: !!opts.admin, resumeTool: opts.resumeTool, autoSessionKey: opts.autoSessionKey });
     } catch (err) {
       term.dispose(); el.remove();          // e.g. the Windows administrator prompt was declined
       toast(cleanErr(err));
@@ -489,6 +509,7 @@
     tabEl.setAttribute('role', 'tab');
     tabEl.tabIndex = 0;
     tabEl.draggable = true;
+    tabEl.setAttribute('aria-keyshortcuts', 'Control+Shift+ArrowUp Control+Shift+ArrowDown');
     tabEl.innerHTML = `<span class="ticon k-${shell.kind}">${KIND_LABEL[shell.kind] || 'SH'}${admin ? `<span class="abadge" title="Administrator">${ICONS.shield}</span>` : ''}</span>
       <span class="tmeta"><span class="ttitle"></span><span class="tsub"></span></span>
       <span class="tstatus"></span>
@@ -496,18 +517,24 @@
     tabsEl.appendChild(tabEl);
 
     const tab = {
-      id, shell, el, term, fit, search, tabEl, admin, autoSessionKey: opts.autoSessionKey || '', cwd: cwd || '', userTitle: (info.resumeTools || []).find(tool => tool.id === opts.resumeTool)?.label || '',
+      id, shell, el, term, fit, search, tabEl, admin, autoSessionKey: opts.autoSessionKey || '', cwd: cwd || '', userTitle: opts.userTitle || (info.resumeTools || []).find(tool => tool.id === opts.resumeTool)?.label || '',
       titleEl: tabEl.querySelector('.ttitle'), subEl: tabEl.querySelector('.tsub'), statusEl: tabEl.querySelector('.tstatus'),
       line: '', dirty: false, pending: false, outBuf: '', tail: '', seenFirstPrompt: false,
-      state: 'empty', running: false, runTimer: null, agent: opts.resumeTool || null, lastOut: 0,
+      state: 'empty', running: false, runTimer: null, agent: opts.agent || opts.resumeTool || null, lastOut: 0, replaying: true, exited: !!opts.exited,
     };
     tabs.set(id, tab);
+    terminalResizeObserver.observe(el.querySelector('.terminal-body'));
+    el.addEventListener('pointerdown', () => { if (activeId !== id) activate(id, false); });
+    el.addEventListener('focusin', () => { if (activeId !== id) activate(id, false); });
+    el.querySelector('.pane-zoom').addEventListener('click', () => { activate(id); togglePaneZoom(); });
+    el.querySelector('.pane-close').addEventListener('click', () => closeTab(id));
     counter++;
     setState(tab, 'empty');                                 // a new tab is plain: no mark, no animation, until something runs
     refreshTab(tab);
 
     // OSC 133;D;<code>: a command finished (PowerShell / bash integration).
     term.parser.registerOscHandler(133, (data) => {
+      if (tab.replaying) return true;
       const m = /^D;(\d+)/.exec(data);
       if (!m) return true;
       // bash fires PROMPT_COMMAND once before the first prompt; that isn't a user command.
@@ -516,7 +543,7 @@
       return true;
     });
     // The terminal bell: Codex rings it when it asks a question (if enabled in Settings).
-    term.onBell(() => { if (settings.bellSound) attention(tab); });
+    term.onBell(() => { if (!tab.replaying && settings.bellSound) attention(tab); });
     search.onDidChangeResults((r) => { if (tab.id === activeId) showFindCount(r); });
     // OSC 9;9;"<path>": current working directory.
     term.parser.registerOscHandler(9, (data) => {
@@ -525,6 +552,7 @@
     });
 
     term.onData((data) => {
+      if (tab.replaying || tab.exited) return;
       window.term.write(id, data);
       // Track what was typed so "ran something" can be told apart from an empty Enter (also how cmd finishes are detected).
       // Escape sequences are not typed text. Focus reports (ESC[I, ESC[O) and paste markers are ignored; arrow keys, Home/End,
@@ -556,6 +584,7 @@
       const k = e.key.toLowerCase();
       // App shortcuts are handled once, at the document level.
       if (e.ctrlKey && e.shiftKey && ['t', 'w', 'b', 'a', 'f', 'k'].includes(k)) return false;
+      if (e.ctrlKey && e.shiftKey && k === 'enter') return false;
       if (e.ctrlKey && (k === 'tab' || k === ',' || k === '=' || k === '+' || k === '-' || k === '0')) return false;
       if (e.key === 'F11') return false;
       if (e.ctrlKey && k === 'c' && (e.shiftKey || term.hasSelection())) { copySelection(term); return false; }
@@ -575,12 +604,32 @@
     el.addEventListener('wheel', (e) => { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); zoom(e.deltaY < 0 ? 1 : -1); } }, { passive: false, capture: true });
 
     wireTabEl(tab);
+    // Replay at the host's previous dimensions before fitting the current window.
+    if (opts.cols && opts.rows) term.resize(opts.cols, opts.rows);
+    if (window.term.attach) {
+      try {
+        const status = await window.term.attach(id);
+        await new Promise(resolve => term.write('', resolve));
+        tab.exited = status.exited;
+        if (status.exited) term.write('\r\n\x1b[90m[Session ended. Previous output restored. This session could not be resumed automatically.]\x1b[0m\r\n');
+      } catch (error) { toast(cleanErr(error)); }
+    }
+    tab.replaying = false;
+    if (opts.state && !tab.exited) setState(tab, opts.state);
     if (opts.activate !== false) activate(id);
+    else renderLayout();
     return id;
   }
 
   function wireTabEl(tab) {
     const { tabEl, id } = tab;
+    tabEl.addEventListener('keydown', e => {
+      if (!e.ctrlKey || !e.shiftKey || !['ArrowUp', 'ArrowDown'].includes(e.key)) return;
+      e.preventDefault(); e.stopPropagation();
+      const ids = orderedIds(), index = ids.indexOf(id), after = e.key === 'ArrowDown';
+      const target = ids[index + (after ? 1 : -1)];
+      if (target !== undefined) { moveTab(id, target, after); tabEl.focus(); }
+    });
     tabEl.addEventListener('click', (e) => { if (e.target.closest('.tclose')) closeTab(id); else activate(id); });
     tabEl.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); closeTab(id); } });
     tabEl.addEventListener('keydown', (e) => { if (e.target === tabEl && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); activate(id); } if (e.key === 'F2') startRename(tab); });
@@ -588,27 +637,61 @@
     tabEl.addEventListener('contextmenu', (e) => { e.preventDefault(); showTabMenu(tab, e.clientX, e.clientY); });
 
     // drag to reorder
-    tabEl.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', String(id)); e.dataTransfer.effectAllowed = 'move'; tabEl.classList.add('dragging'); });
+    const startDrag = e => {
+      if (e.target.closest('button,input')) { e.preventDefault(); return; }
+      e.dataTransfer.setData('application/x-belor-tab', String(id));
+      e.dataTransfer.effectAllowed = 'move'; tabEl.classList.add('dragging');
+    };
+    tabEl.addEventListener('dragstart', startDrag);
     tabEl.addEventListener('dragend', () => { tabEl.classList.remove('dragging'); clearDropMarks(); });
     tabEl.addEventListener('dragover', (e) => {
-      if (e.dataTransfer.types.includes('Files')) return;
+      if (!e.dataTransfer.types.includes('application/x-belor-tab')) return;
       e.preventDefault();
       const r = tabEl.getBoundingClientRect();
       clearDropMarks();
       tabEl.classList.add(e.clientY < r.top + r.height / 2 ? 'drop-before' : 'drop-after');
     });
     tabEl.addEventListener('drop', (e) => {
-      if (e.dataTransfer.types.includes('Files')) return;
+      if (!e.dataTransfer.types.includes('application/x-belor-tab')) return;
       e.preventDefault();
-      const dragged = tabs.get(+e.dataTransfer.getData('text/plain'));
+      const dragged = tabs.get(+e.dataTransfer.getData('application/x-belor-tab'));
       const before = tabEl.classList.contains('drop-before');
       clearDropMarks();
       if (!dragged || dragged.id === id) return;
-      tabsEl.insertBefore(dragged.tabEl, before ? tabEl : tabEl.nextSibling);
-      persistSession();
+      moveTab(dragged.id, id, !before);
+    });
+    const header = tab.el.querySelector('.pane-header');
+    header.draggable = true;
+    header.title = 'Drag to move this terminal. You can also reorder tabs in the sidebar.';
+    header.addEventListener('dragstart', startDrag);
+    header.addEventListener('dragend', () => { tabEl.classList.remove('dragging'); clearDropMarks(); });
+    tab.el.addEventListener('dragover', e => {
+      if (!e.dataTransfer.types.includes('application/x-belor-tab')) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+      clearDropMarks(); tab.el.classList.add('pane-drop');
+    });
+    tab.el.addEventListener('dragleave', e => { if (!tab.el.contains(e.relatedTarget)) tab.el.classList.remove('pane-drop'); });
+    tab.el.addEventListener('drop', e => {
+      if (!e.dataTransfer.types.includes('application/x-belor-tab')) return;
+      e.preventDefault();
+      const dragged = +e.dataTransfer.getData('application/x-belor-tab');
+      clearDropMarks();
+      if (!tabs.has(dragged) || dragged === id) return;
+      if (!visibleIds.includes(dragged)) visibleIds = visibleIds.map(value => value === id ? dragged : value);
+      moveTab(dragged, id);
     });
   }
-  const clearDropMarks = () => tabsEl.querySelectorAll('.drop-before,.drop-after').forEach((n) => n.classList.remove('drop-before', 'drop-after'));
+  function moveTab(id, targetId, after = false) {
+    const tab = tabs.get(id), target = tabs.get(targetId);
+    if (!tab || !target || id === targetId) return;
+    tabsEl.insertBefore(tab.tabEl, after ? target.tabEl.nextSibling : target.tabEl);
+    visibleIds = orderedIds().filter(value => visibleIds.includes(value));
+    renderLayout(); persistSession(true);
+  }
+  const clearDropMarks = () => {
+    tabsEl.querySelectorAll('.drop-before,.drop-after').forEach(n => n.classList.remove('drop-before', 'drop-after'));
+    termsEl.querySelectorAll('.pane-drop').forEach(n => n.classList.remove('pane-drop'));
+  };
 
   function startRename(tab) {
     const input = document.createElement('input');
@@ -621,7 +704,7 @@
     let done = false;
     const finish = (commit) => {
       if (done) return; done = true;
-      if (commit) tab.userTitle = input.value.trim();
+      if (commit) tab.userTitle = input.value.trim().slice(0, 80);
       tab.tabEl.draggable = true;
       refreshTab(tab);
       tab.term.focus();
@@ -632,9 +715,101 @@
     input.addEventListener('dblclick', (e) => e.stopPropagation());
   }
 
-  function activate(id) {
+  function renderLayout() {
+    visibleIds = visibleIds.filter(id => tabs.has(id)).slice(0, 6);
+    if (!visibleIds.length && tabs.has(activeId)) visibleIds = [activeId];
+    const grid = settings.layout === 'grid';
+    const shown = grid ? visibleIds : [activeId];
+    const count = shown.length;
+    // Five uses three equal panes above two equal panes; six uses a 3 by 2 grid.
+    const columns = count === 5 ? 6 : count === 4 ? 2 : Math.min(count, 3) || 1;
+    termsEl.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+    termsEl.style.gridTemplateRows = `repeat(${count > 3 ? 2 : 1}, minmax(0, 1fr))`;
+    termsEl.classList.toggle('tiled', grid && count > 1);
+    for (const t of tabs.values()) {
+      const slot = shown.indexOf(t.id);
+      t.el.classList.toggle('visible', slot !== -1);
+      t.tabEl.classList.toggle('in-layout', visibleIds.includes(t.id) && grid);
+      // Explicit cells keep pane positions stable when focus moves between terminals.
+      t.el.style.gridColumn = slot < 0 ? '' : count === 5 ? (slot < 3 ? `${1 + slot * 2} / span 2` : `${1 + (slot - 3) * 3} / span 3`) : String(1 + slot % columns);
+      t.el.style.gridRow = slot < 0 ? '' : String(count === 5 ? (slot < 3 ? 1 : 2) : 1 + Math.floor(slot / columns));
+    }
+    for (const button of layoutSwitch.querySelectorAll('[data-view]')) button.setAttribute('aria-pressed', String(button.dataset.view === settings.layout));
+    chooseTabs.hidden = !grid;
+    chooseTabs.textContent = `Choose tabs (${visibleIds.length}/6)`;
+    if (!gridTabs.hidden) buildGridChoices();
+    fitSoon();
+  }
+
+  function setLayout(view) {
+    if (!['full', 'grid'].includes(view)) return;
+    settings.layout = view;
+    if (view === 'grid' && !visibleIds.includes(activeId)) activeId = visibleIds.find(id => tabs.has(id)) ?? activeId;
+    closePopups();
+    if (tabs.has(activeId)) activate(activeId);
+    else renderLayout();
+    saveSettings();
+  }
+  function selectGridTab(id, selected) {
+    if (!tabs.has(id)) return;
+    if (selected && !visibleIds.includes(id)) {
+      if (visibleIds.length === 6) { toast('Select up to six tabs. Uncheck a tab to make room.'); return; }
+      visibleIds.push(id);
+    } else if (!selected && visibleIds.includes(id)) {
+      if (visibleIds.length === 1) { toast('Keep at least one tab selected.'); renderLayout(); return; }
+      visibleIds = visibleIds.filter(value => value !== id);
+      if (settings.layout === 'grid' && activeId === id) { activate(visibleIds[0], false); return; }
+    }
+    renderLayout();
+    persistSession();
+  }
+  function buildGridChoices() {
+    gridTabs.replaceChildren();
+    const hint = document.createElement('div');
+    hint.className = 'menu-head'; hint.textContent = 'Display up to 6 open tabs'; gridTabs.appendChild(hint);
+    for (const id of orderedIds()) {
+      const tab = tabs.get(id), label = document.createElement('label'), input = document.createElement('input');
+      input.type = 'checkbox'; input.checked = visibleIds.includes(id); input.dataset.id = String(id);
+      input.disabled = !input.checked && visibleIds.length === 6;
+      const text = document.createElement('span'); text.textContent = titleOf(tab);
+      const detail = document.createElement('small'); detail.textContent = tab.admin ? `Administrator · ${tab.shell.label}` : tab.cwd || tab.shell.label;
+      const meta = document.createElement('span'); meta.append(text, detail);
+      label.title = tab.tabEl.title; label.append(input, meta); gridTabs.appendChild(label);
+      input.addEventListener('change', () => { selectGridTab(id, input.checked); gridTabs.querySelector(`input[data-id="${id}"]`)?.focus(); });
+    }
+  }
+  function togglePaneZoom() {
+    setLayout(settings.layout === 'grid' ? 'full' : 'grid');
+  }
+  layoutSwitch.addEventListener('click', event => {
+    const button = event.target.closest('[data-view]');
+    if (button) setLayout(button.dataset.view);
+  });
+  layoutSwitch.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const view = event.key === 'Home' || event.key === 'ArrowLeft' ? 'full' : 'grid';
+    setLayout(view); layoutSwitch.querySelector(`[data-view="${view}"]`).focus();
+  });
+  chooseTabs.addEventListener('click', () => {
+    const open = gridTabs.hidden;
+    closePopups();
+    if (open) {
+      buildGridChoices(); gridTabs.hidden = false; chooseTabs.setAttribute('aria-expanded', 'true');
+      const rect = chooseTabs.getBoundingClientRect();
+      gridTabs.style.left = Math.max(8, Math.min(rect.right - 280, innerWidth - 288)) + 'px';
+      gridTabs.style.top = rect.bottom + 4 + 'px';
+      gridTabs.querySelector('input')?.focus();
+    }
+  });
+
+  function activate(id, focus = true) {
     const tab = tabs.get(id);
     if (!tab) return;
+    if (settings.layout === 'grid' && !visibleIds.includes(id)) {
+      if (visibleIds.length === 6) { toast('Six tabs are displayed. Use Choose tabs to change the selection.'); return; }
+      visibleIds.push(id);
+    }
     activeId = id;
     for (const t of tabs.values()) {
       const on = t.id === id;
@@ -642,16 +817,17 @@
       t.tabEl.classList.toggle('active', on);
       t.tabEl.setAttribute('aria-selected', on ? 'true' : 'false');
     }
+    renderLayout();
     tab.tabEl.scrollIntoView({ block: 'nearest' });
     refreshCrumb(tab);
     showFindCount(null);
     if (!findBar.hidden) doFind(0);        // keep the find bar working on whichever tab is showing
     persistSession();
-    requestAnimationFrame(() => { fitTab(tab); if (drawer.hidden && findBar.hidden) tab.term.focus(); });
+    requestAnimationFrame(() => { fitTab(tab); if (focus && activeId === id && drawer.hidden && findBar.hidden) tab.term.focus(); });
   }
 
   function fitTab(tab) {
-    if (!tab.el.classList.contains('active')) return;
+    if (tab.replaying || !tab.el.classList.contains('visible')) return;
     try { tab.fit.fit(); window.term.resize(tab.id, tab.term.cols, tab.term.rows); } catch { /* not visible yet */ }
   }
 
@@ -663,24 +839,33 @@
 
   function closeTab(id) { if (!tabs.has(id)) return; window.term.kill(id); removeTab(id); }
 
-  function removeTab(id) {
+  function removeTab(id, keepWindow = false) {
     const tab = tabs.get(id);
     if (!tab) return;
     const idx = orderedIds().indexOf(id);
+    clearTimeout(tab.runTimer);
+    terminalResizeObserver.unobserve(tab.el.querySelector('.terminal-body'));
     tab.term.dispose();
     tab.el.remove();
     tab.tabEl.remove();
     tabs.delete(id);
-    if (tabs.size === 0) { settings.startup.session = []; saveSettings(); window.close(); return; }
-    if (activeId === id) { const rest = orderedIds(); activate(rest[Math.min(idx, rest.length - 1)]); }
+    if (tabs.size === 0) {
+      settings.startup.session = []; saveSettings();
+      if (!keepWindow) window.close();
+      else { activeId = null; $('crumb-title').textContent = 'Terminal'; $('crumb-sub').textContent = ''; renderLayout(); }
+      return;
+    }
+    if (activeId === id) { const rest = visibleIds.filter(i => tabs.has(i)); activate(rest[0] ?? orderedIds()[Math.min(idx, tabs.size - 1)]); }
+    else renderLayout();
     persistSession();
   }
 
-  window.term.onData((id, data) => {
+  window.term.onData((id, data, replay) => {
     const tab = tabs.get(id);
     if (!tab) return;
     tab.lastOut = Date.now();
     tab.term.write(data);
+    if (replay) return;
     if (tab.shell.kind === 'cmd') {
       tab.tail = (tab.tail + data).slice(-600);
       const pm = CMD_PROMPT.exec(tab.tail.replace(ANSI, ''));
@@ -696,12 +881,37 @@
       }
     }
   });
-  window.term.onExit((id) => removeTab(id));
-  new ResizeObserver(() => { const t = tabs.get(activeId); if (t) fitTab(t); }).observe(termsEl);
+  window.term.onExit((id, code) => {
+    const tab = tabs.get(id);
+    if (!tab) return;
+    tab.exited = true;
+    clearTimeout(tab.runTimer); tab.running = false;
+    setState(tab, code === 0 ? 'ok' : 'fail');
+    tab.term.write('\r\n\x1b[90m[Session ended. Previous output restored. This session could not be resumed automatically.]\x1b[0m\r\n');
+  });
+  window.term.onError?.(toast);
+  async function popoutTab(id) {
+    if (!tabs.has(id) || !window.term.popout) return;
+    try { await window.term.popout(id); removeTab(id, true); }
+    catch (error) { toast(cleanErr(error)); }
+  }
+  window.term.onReturned?.(async record => {
+    if (tabs.has(record.id)) { activate(record.id); return; }
+    await openTab(record.shellId, record);
+  });
+  $('popout-tab').addEventListener('click', () => {
+    if (info.popoutId) window.term.returnToMain(); else popoutTab(activeId);
+  });
+  if (info.popoutId) {
+    $('popout-tab').title = 'Return terminal to the main window';
+    $('popout-tab').setAttribute('aria-label', 'Return terminal to the main window');
+  }
+  const terminalResizeObserver = new ResizeObserver(() => { for (const t of tabs.values()) fitTab(t); });
+  terminalResizeObserver.observe(termsEl);
 
   // =================================================================== menus
-  function closePopups() { newMenu.hidden = true; ctx.hidden = true; }
-  document.addEventListener('click', (e) => { if (!e.target.closest('.popup') && !e.target.closest('#new-menu-btn')) closePopups(); });
+  function closePopups() { newMenu.hidden = true; ctx.hidden = true; gridTabs.hidden = true; chooseTabs.setAttribute('aria-expanded', 'false'); }
+  document.addEventListener('click', (e) => { if (!e.target.closest('.popup') && !e.target.closest('#new-menu-btn') && !e.target.closest('#choose-tabs')) closePopups(); });
   window.addEventListener('blur', closePopups);
 
   function buildNewMenu() {
@@ -759,7 +969,8 @@
       ctx.appendChild(b);
     };
     item('Rename', () => startRename(tab));
-    item('Duplicate', () => openTab(tab.shell.id, { cwd: isRemoteish(tab) ? undefined : tab.cwd, admin: tab.admin }));
+    if (!info.popoutId) item('Duplicate', () => openTab(tab.shell.id, { cwd: isRemoteish(tab) ? undefined : tab.cwd, admin: tab.admin }));
+    if (!info.popoutId) item('Open in separate window', () => popoutTab(tab.id));
     ctx.appendChild(document.createElement('hr'));
     item('Close tab', () => closeTab(tab.id), true);
     item('Close other tabs', () => orderedIds().filter((i) => i !== tab.id).forEach(closeTab), true);
@@ -772,12 +983,20 @@
   }
 
   $('new-btn').addEventListener('click', () => openTab(settings.defaultShell));
-  $('new-menu-btn').addEventListener('click', (e) => { e.stopPropagation(); ctx.hidden = true; buildNewMenu(); newMenu.hidden = !newMenu.hidden; });
+  $('new-menu-btn').addEventListener('click', (e) => {
+    e.stopPropagation(); ctx.hidden = true; buildNewMenu();
+    const rect = $('new-menu-btn').getBoundingClientRect();
+    newMenu.style.left = Math.min(rect.left, innerWidth - 230) + 'px';
+    newMenu.style.top = rect.bottom + 4 + 'px';
+    newMenu.hidden = !newMenu.hidden;
+  });
 
   // =================================================================== sidebar buttons
   function applyCollapsed() {
     document.body.classList.toggle('collapsed', settings.collapsed);
     $('collapse-btn').title = settings.collapsed ? 'Expand sidebar (Ctrl+Shift+B)' : 'Collapse sidebar (Ctrl+Shift+B)';
+    $('collapse-btn').setAttribute('aria-label', settings.collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+    $('collapse-btn').setAttribute('aria-expanded', String(!settings.collapsed));
     setTimeout(fitSoon, 220);
   }
   function toggleSidebar() { settings.collapsed = !settings.collapsed; saveSettings(); applyCollapsed(); }
@@ -1211,8 +1430,6 @@
     bindSelect('set-startdir', () => SU.dirMode, (v) => { SU.dirMode = v; saveSettings(); paintStartRow(); }),
     bindSwitch('set-ontop', () => W.alwaysOnTop, (v) => { W.alwaysOnTop = v; saveSettings(); pushPrefs(); }),
     bindRange('set-winop', () => W.opacity, (v) => { W.opacity = v; saveSettings(); pushPrefs(); }, (v) => v + '%'),
-    bindSwitch('set-confirmclose', () => W.confirmClose, (v) => { W.confirmClose = v; saveSettings(); pushPrefs(); }),
-    bindSwitch('set-restore', () => SU.restore, (v) => { SU.restore = v; saveSettings(); persistSession(true); }),
     () => { startPath.value = SU.dir; paintStartRow(); },
   ];
   startPath.addEventListener('input', () => { SU.dir = startPath.value; saveSettings(); });
@@ -1236,11 +1453,13 @@
     const k = e.key.toLowerCase();
     if (e.key === 'Escape') {
       if (!drawer.hidden && !e.target.closest('input[type=text]')) { closeSettings(); return; }
-      if (!newMenu.hidden || !ctx.hidden) { closePopups(); tabs.get(activeId)?.term.focus(); return; }
+      if (!newMenu.hidden || !ctx.hidden || !gridTabs.hidden) { closePopups(); tabs.get(activeId)?.term.focus(); return; }
     }
     if (e.key === 'F11') { e.preventDefault(); window.term.toggleFullscreen(); return; }
     if (!e.ctrlKey) return;
-    if (e.shiftKey && k === 'f') { e.preventDefault(); openFind(); }
+    if (info.popoutId && e.shiftKey && ['t', 'a', 'b'].includes(k)) { e.preventDefault(); return; }
+    if (e.shiftKey && k === 'enter') { e.preventDefault(); togglePaneZoom(); }
+    else if (e.shiftKey && k === 'f') { e.preventDefault(); openFind(); }
     else if (e.shiftKey && k === 'k') { e.preventDefault(); tabs.get(activeId)?.term.clear(); }
     else if (k === '=' || k === '+') { e.preventDefault(); zoom(1); }
     else if (k === '-') { e.preventDefault(); zoom(-1); }
@@ -1263,16 +1482,23 @@
   applyAppearance();
   showPanel('theme');
 
-  // reopen last time's tabs if asked to, otherwise start with one tab
-  if (settings.startup.restore && settings.startup.session.length) {
+  // Reconnect to the original processes; this does not launch replacement shells.
+  const hosted = window.term.sessions ? await window.term.sessions() : [];
+  if (info.popoutId && !hosted.length) { window.close(); return; }
+  hosted.sort((a, b) => (a.order ?? a.id) - (b.order ?? b.id));
+  for (const tab of hosted) await openTab(tab.shellId, { ...tab, activate: false });
+  visibleIds = hosted.filter(tab => tab.gridOrder >= 0).sort((a, b) => a.gridOrder - b.gridOrder).map(tab => tab.id).slice(0, 6);
+  if (hosted.length) activate(hosted.find(tab => tab.active)?.id ?? hosted[0].id);
+  if (!hosted.length && settings.startup.restore && settings.startup.session.length) {
     const saved = settings.startup.session.slice(), want = settings.startup.active;
-    for (const t of saved) await openTab(info.shells.some((s) => s.id === t.shellId) ? t.shellId : settings.defaultShell, { cwd: t.cwd || undefined });
+    for (const t of saved) await openTab(info.shells.some((s) => s.id === t.shellId) ? t.shellId : settings.defaultShell, { cwd: t.cwd || undefined, userTitle: t.userTitle || '' });
     const ids = orderedIds();
     if (ids.length) activate(ids[Math.min(want, ids.length - 1)]);
   }
   if (!tabs.size) await openTab(settings.defaultShell);
+  await setLayout(settings.layout);
   // Existing native resume menus remain available; identified active sessions open without a picker.
-  const importedSessions = new Set();
+  const importedSessions = new Set([...hosted.map(tab => tab.autoSessionKey).filter(Boolean), ...(window.term.dismissed ? await window.term.dismissed() : [])]);
   const windowEntries = new Map(), dismissedWindows = new Set();
   function syncWindowEntries(windows) {
     const live = new Set(windows.map(terminalWindow => terminalWindow.key));
@@ -1316,6 +1542,8 @@
   }
   let syncingSessions = false, lastSessionError = '', initialSessionScan = true;
   async function syncRunningSessions() {
+    if (info.popoutId) return;
+    if (location.search.includes('selftest')) return; // Isolated UI tests must not resume the user's external work.
     if (syncingSessions) return;
     syncingSessions = true;
     const initialTab = tabs.get(activeId);
@@ -1350,5 +1578,5 @@
   const runningSessionTimer = setInterval(() => { if (!document.hidden) syncRunningSessions(); }, 10000);
   window.addEventListener('beforeunload', () => clearInterval(runningSessionTimer));
   window.addEventListener('beforeunload', () => persistSession(true));
-  if (location.search.includes('selftest')) window.__st = { tabs, settings, setState };   // test hook, only when the app runs in self-test mode
+  if (location.search.includes('selftest')) window.__st = { tabs, settings, setState, setLayout, selectGridTab, activate, openTab, closeTab, togglePaneZoom };   // test hook, only when the app runs in self-test mode
 })();

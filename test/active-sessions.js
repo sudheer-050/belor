@@ -23,6 +23,11 @@ assert.equal(toolFor(p(1,0,'node.exe',{commandLine:'node some-server.js'})),null
 assert.equal(toolFor(p(1,0,'codex.exe',{commandLine:'codex exec task'})),null);
 const ambiguous = {processes:snapshot.processes.slice(0,3), files:[{pid:3,file:'one'},{pid:3,file:'two'}]};
 assert.equal(select(ambiguous,[],meta).length,0,'do not choose an arbitrary conversation');
+assert.equal(select(ambiguous,[],meta,[2]).length,0,'owned terminals must also reject ambiguous identities');
+const owned = select(snapshot, [], meta, [8]);
+assert.equal(owned.length, 1, 'Identify a Belor conversation only through its exact PTY ancestry');
+assert.equal(owned[0].pid, 9); assert.equal(owned[0].ownerPid, 8);
+assert.equal(select(snapshot, [], meta, [99]).length, 0, 'Never attach unrelated saved history to a tab');
 assert.equal(select(snapshot,[],()=>({sessionId:'bad',cwd:'C:\\Projects'})).length,0);
 const terminalWindows = { ...snapshot, windows:[
   {pid:1,window:101,started:'2026-11-11',name:'WindowsTerminal.exe',title:'Project terminal'},
