@@ -40,6 +40,7 @@ jobs:
       - name: Popout session ownership checks
         run: node test/popout-window.js
       - name: Native conversation notification checks
+        timeout-minutes: 1
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/notify-session.ps1
       - name: Native process and saved-session ownership checks
         run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File test/active-sessions-native.ps1
