@@ -2,6 +2,7 @@
 
 - New Auto contrast setting (on by default): every piece of terminal text is kept at least 7:1 against its background on any theme, including menu highlights such as the `/` list.
 - The color palette, main text color and accent are adjusted per theme when needed; mouse selection text switches between black and white for readability.
+- The selected row of Claude Code's `/` menu now gets a bright background (amber on dark themes, purple on light), switchable in Settings.
 - The manual Minimum contrast slider still works when Auto contrast is off.
 
 Windows x64. The installer is unsigned.
