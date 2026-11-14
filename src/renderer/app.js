@@ -35,7 +35,7 @@
       term: {
         scrollback: 10000, scrollSpeed: 1, scrollOnInput: true,
         copyOnSelect: false, rightClick: 'smart', confirmPaste: true, wordSep: ` ()[]{}',"\``,
-        contrast: 1, boldBright: true, unicode: '11', cursorInactive: 'outline', linkNeedsCtrl: true,
+        contrast: 1, contrastAuto: true, menuHighlight: true, boldBright: true, unicode: '11', cursorInactive: 'outline', linkNeedsCtrl: true,
       },
       tabColors: { running: '', ok: '', fail: '', empty: '', ask: '' },   // '' = follow the theme
       win: { alwaysOnTop: false, opacity: 100, confirmClose: true },
@@ -97,10 +97,18 @@
   const q = (name) => `"${String(name).replace(/["\\]/g, '')}"`;
   const fontStack = () => `${q(settings.font.family)}, "Cascadia Code", Consolas, "Courier New", monospace`;
 
+  const AUTO_CONTRAST = 4.5;   // WCAG AA: every color is kept at least this readable. Higher flattens the palette so menu highlights blend into normal text.
+  const AUTO_TEXT = 7;         // plain text gets the stricter AAA level
+  const minContrast = () => (settings.term.contrastAuto ? AUTO_CONTRAST : settings.term.contrast);
   function xtermTheme(th) {
-    const a = th.ansi;
+    const min = minContrast();
+    // With auto contrast the palette itself is adjusted for this theme's background (black, index 0, is left alone: it is used as a fill).
+    const a = th.ansi.map((c, i) => (settings.term.contrastAuto && i !== 0 ? color.ensureContrast(c, th.bg, min) : c));
+    const fg = settings.term.contrastAuto ? color.ensureContrast(th.fg, th.bg, AUTO_TEXT) : th.fg;
     return {
-      background: '#00000000', foreground: th.fg, cursor: th.cursor, cursorAccent: th.bg, selectionBackground: th.selection,
+      // Opaque on purpose: xterm measures contrast and paints reverse-video text against it. The CSS keeps the terminal itself see-through.
+      background: th.bg, foreground: fg, cursor: th.cursor, cursorAccent: th.bg,
+      selectionBackground: th.selection, selectionForeground: color.readableOn(th.selection),
       black: a[0], red: a[1], green: a[2], yellow: a[3], blue: a[4], magenta: a[5], cyan: a[6], white: a[7],
       brightBlack: a[8], brightRed: a[9], brightGreen: a[10], brightYellow: a[11], brightBlue: a[12], brightMagenta: a[13], brightCyan: a[14], brightWhite: a[15],
     };
@@ -114,11 +122,54 @@
       theme: xtermTheme(effectiveTheme()), allowTransparency: true,
       scrollback: settings.term.scrollback, scrollSensitivity: settings.term.scrollSpeed, fastScrollSensitivity: settings.term.scrollSpeed * 5,
       scrollOnUserInput: settings.term.scrollOnInput, wordSeparator: settings.term.wordSep,
-      minimumContrastRatio: settings.term.contrast, drawBoldTextInBrightColors: settings.term.boldBright,
+      minimumContrastRatio: minContrast(), drawBoldTextInBrightColors: settings.term.boldBright,
       cursorInactiveStyle: settings.term.cursorInactive,
       windowsPty: { backend: 'conpty', buildNumber: info.windowsBuild },   // lets xterm wrap and reflow ConPTY lines correctly
     };
   }
+  // Claude Code draws the selected row of its "/" menu with a pale truecolor that is almost the text color, so no palette change can fix it.
+  // Find those runs and paint a loud background behind them instead.
+  const MENU_RGB = new Set([0xb1b9f9, 0x99ccff, 0x5769f7, 0x3366ff]);
+  function watchMenuHighlight(term) {
+    let decos = [], sig = '', timer = 0;
+    const isMenuCell = (c) => (c.isFgRGB() ? MENU_RGB.has(c.getFgColor()) : c.isFgPalette() && (c.getFgColor() === 12 || c.getFgColor() === 4));
+    const scan = () => {
+      timer = 0;
+      if (!settings.term.menuHighlight) { if (sig) { decos.forEach((d) => d.dispose()); decos = []; sig = ''; } return; }
+      const b = term.buffer.active, found = [];
+      for (let r = 0; r < term.rows; r++) {
+        const line = b.getLine(b.viewportY + r);
+        if (!line) continue;
+        const n = Math.min(line.length, term.cols);
+        const cell = line.getCell(0);
+        let start = -1;
+        for (let x = 0; x <= n; x++) {
+          const c = x < n ? line.getCell(x, cell) : null;
+          const ch = c ? c.getChars() : '';
+          const on = !!c && ch !== '' && ch !== ' ' && isMenuCell(c);
+          if (on && start < 0) start = x;
+          if (!on && start >= 0) {
+            if (line.getCell(start).getChars() === '/' && x - start >= 2) found.push([r, start, x - start]);
+            start = -1;
+          }
+        }
+      }
+      const next = found.map((f) => f.join(':')).join('|') + '@' + b.viewportY + '@' + (settings.term.menuHighlight ? effectiveTheme().bg : '');
+      if (next === sig) return;
+      sig = next;
+      decos.forEach((d) => d.dispose()); decos = [];
+      const dark = isDark(effectiveTheme().bg);
+      for (const [r, x, width] of found) {
+        const marker = term.registerMarker(b.viewportY + r - (b.baseY + b.cursorY));
+        if (!marker) continue;
+        const d = term.registerDecoration({ marker, x, width, backgroundColor: dark ? '#ffc400' : '#7a00e6', foregroundColor: dark ? '#000000' : '#ffffff', layer: 'top' });
+        if (d) decos.push(d);
+      }
+    };
+    const later = () => { if (!timer) timer = setTimeout(scan, 50); };
+    term.onWriteParsed(later); term.onScroll(later); term.onResize(later);
+  }
+
   function applyTermOptions(tab) {
     const o = termOptions();
     for (const k of Object.keys(o)) { if (tab.term.options[k] !== o[k] || k === 'theme') tab.term.options[k] = o[k]; }
@@ -142,7 +193,7 @@
     const dark = isDark(th.bg);
     root.dataset.mode = dark ? 'dark' : 'light';
     const set = (k, v) => root.style.setProperty(k, v);
-    set('--t-bg', th.bg); set('--t-fg', th.fg); set('--t-accent', th.accent); set('--t-sel', th.selection);
+    set('--t-bg', th.bg); set('--t-fg', th.fg); set('--t-accent', settings.term.contrastAuto ? color.ensureContrast(th.accent, th.bg, AUTO_CONTRAST) : th.accent); set('--t-sel', th.selection);
     set('--t-ok', dark ? th.ansi[10] : th.ansi[2]); set('--t-bad', dark ? th.ansi[9] : th.ansi[1]);
     set('--term-op', String(bgs.termOpacity)); set('--side-op', String(bgs.sideOpacity));
     for (const [key, css] of TAB_COLOR_KEYS) set(css, tabColor(key, th, dark));
@@ -491,6 +542,7 @@
     term.loadAddon(new Unicode11Addon.Unicode11Addon());
     term.unicode.activeVersion = settings.term.unicode;
     term.open(el.querySelector('.terminal-body'));
+    watchMenuHighlight(term);
     fit.fit();
 
     let id;
@@ -1411,6 +1463,8 @@
     bindSwitch('set-copysel', () => T.copyOnSelect, (v) => { T.copyOnSelect = v; tSave(); }),
     bindSelect('set-rclick', () => T.rightClick, (v) => { T.rightClick = v; tSave(); }),
     bindSwitch('set-confirmpaste', () => T.confirmPaste, (v) => { T.confirmPaste = v; tSave(); }),
+    bindSwitch('set-menuhl', () => T.menuHighlight, (v) => { T.menuHighlight = v; tApply(); }),
+    bindSwitch('set-contrastauto', () => T.contrastAuto, (v) => { T.contrastAuto = v; tApply(); }),
     bindRange('set-contrast', () => T.contrast, (v) => { T.contrast = v; tApply(); }, (v) => (v <= 1 ? 'Off' : v)),
     bindSwitch('set-boldbright', () => T.boldBright, (v) => { T.boldBright = v; tApply(); }),
     bindSelect('set-unicode', () => T.unicode, (v) => { T.unicode = v; tApply(); }),

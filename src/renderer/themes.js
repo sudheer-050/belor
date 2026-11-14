@@ -56,6 +56,16 @@
   };
   const isDark = (hex) => luminance(hex) < 0.4;
   const mix = (a, b, t) => { const x = toRgb(a), y = toRgb(b); return toHex(x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t, x[2] + (y[2] - x[2]) * t); };
+  const ratio = (a, b) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  // Nudge `c` toward white or black (whichever reads better on `bg`) until it reaches the contrast `min` against bg.
+  const ensureContrast = (c, bg, min) => {
+    if (ratio(c, bg) >= min) return c;
+    const target = ratio('#ffffff', bg) >= ratio('#000000', bg) ? '#ffffff' : '#000000';
+    for (let t = 0.05; t <= 1.0001; t += 0.05) { const n = mix(c, target, t); if (ratio(n, bg) >= min) return n; }
+    return target;
+  };
+  // The more readable of white/black text on `bg`.
+  const readableOn = (bg) => (ratio('#ffffff', bg) >= ratio('#000000', bg) ? '#ffffff' : '#000000');
   const rgba = (hex, alpha) => { const [r, g, b] = toRgb(hex); return `rgba(${r},${g},${b},${alpha})`; };
   const normHex = (v) => {
     v = String(v).trim().replace(/^#/, '');
@@ -79,5 +89,5 @@
   window.GRADIENTS = GRADIENTS;
   window.FONT_CHOICES = FONT_CHOICES;
   window.ANSI_NAMES = ANSI_NAMES;
-  window.color = { toRgb, toHex, luminance, isDark, mix, rgba, normHex, fontInstalled };
+  window.color = { ratio, ensureContrast, readableOn, toRgb, toHex, luminance, isDark, mix, rgba, normHex, fontInstalled };
 })();

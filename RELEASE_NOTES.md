@@ -1,3 +1,11 @@
+# Belor 0.7.10
+
+- New Auto contrast setting (on by default): every piece of terminal text is kept at least 7:1 against its background on any theme, including menu highlights such as the `/` list.
+- The color palette, main text color and accent are adjusted per theme when needed; mouse selection text switches between black and white for readability.
+- The manual Minimum contrast slider still works when Auto contrast is off.
+
+Windows x64. The installer is unsigned.
+
 # Belor 0.7.9
 
 - Reconnect to the same terminal processes after closing or quitting the desktop, retaining output produced while away.

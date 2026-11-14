@@ -216,7 +216,11 @@
         <input id="set-wordsep" type="text" spellcheck="false"></div>
 
       <h3>Text</h3>
-      <div class="row"><label for="set-contrast">Minimum contrast<small>Raises the contrast of hard-to-read colors. 1 = off</small></label>
+      <div class="row"><label for="set-menuhl">Highlight the selected menu item<small>Paints a bright background behind the selected row of Claude Code's / menu so it stands out</small></label>
+        <label class="switch"><input id="set-menuhl" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-contrastauto">Auto contrast<small>Keeps every piece of text clearly readable on any theme or background, including menu highlights</small></label>
+        <label class="switch"><input id="set-contrastauto" type="checkbox"><span></span></label></div>
+      <div class="row"><label for="set-contrast">Minimum contrast<small>Used when auto contrast is off. Raises the contrast of hard-to-read colors. 1 = off</small></label>
         <div class="range"><input id="set-contrast" type="range" min="1" max="21" step="0.5"><output id="set-contrast-out"></output></div></div>
       <div class="row"><label for="set-boldbright">Bold text uses the bright colors</label>
         <label class="switch"><input id="set-boldbright" type="checkbox"><span></span></label></div>

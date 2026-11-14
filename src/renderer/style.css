@@ -166,6 +166,7 @@ body.popout .pane-zoom { display: none; }
 button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (max-width: 850px) { .layout-controls label, #crumb-sub { display: none; } }
 @media (prefers-reduced-motion: reduce) { #sidebar { transition: none; } }
+.xterm .xterm-scrollable-element, .xterm .xterm-viewport, .xterm .xterm-screen { background-color: transparent !important; }   /* the theme background is opaque for contrast maths; keep the terminal see-through */
 .xterm-viewport { background-color: transparent !important; scrollbar-width: none; }
 .xterm-viewport::-webkit-scrollbar { display: none; }   /* xterm draws its own fade-in scrollbar */
 
